@@ -1,0 +1,33 @@
+# Variables de entorno y secretos (NUNCA subir .env a GitHub)
+.env
+.env.*
+!.env.example
+
+# Entornos virtuales y empaquetado Python
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+
+# Cachés de Python y Pytest
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Bases de datos locales y temporales
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs e IDEs
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
