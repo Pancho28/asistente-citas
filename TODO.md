@@ -7,18 +7,19 @@
 
 ---
 
+## 🌐 Tareas Cross-Repo, CI/CD y Despliegue (GitHub, API Gateway & Railway — Pendientes)
+- [ ] **CI/CD en GitHub Actions:** Crear workflow en `.github/workflows/ci.yml` que ejecute `pytest` automáticamente en cada `push` y `pull_request` hacia `main` antes de desplegar en Railway.
+- [ ] Programar en el repositorio del **API Gateway** el endpoint `POST /webhooks/{provider}/{app_id}` según el contrato de `SPEC.md` y [`paso_prod.md`](./paso_prod.md).
+- [ ] Aprovisionar en **Railway** PostgreSQL, Redis, el servicio Web (`asistente-citas-api`), el Worker (`asistente-citas-worker`) y registrar el webhook en Telegram siguiendo [`paso_prod.md`](./paso_prod.md).
+
+---
+
 ## 🔮 Backlog Post-MVP (Mejoras para Futuras Versiones — Fase 2)
 - [ ] **1. Desbloquear un horario (`eliminar_bloqueo_agenda`):** Permitir al médico listar y eliminar/revertir un `BloqueoAgenda` previamente registrado (ej. si se cancela una junta médica o congreso y desea reabrir su agenda).
 - [ ] **2. Jornada partida en un mismo día (Horario de almuerzo fijo):** Soportar múltiples tramos horarios para un mismo día en `configurar_horario_base_y_perfil` (ej. de `08:00` a `12:00` y de `14:00` a `18:00`) sin necesidad de usar bloqueos manuales.
 - [ ] **3. Notificaciones proactivas cruzadas en tiempo real (Médico $\leftrightarrow$ Paciente):** Disparar aviso automático por Telegram/WhatsApp al paciente cuando el médico mueva o cancele manualmente su cita, y al médico cuando el paciente agende, reagende o cancele.
 - [ ] **4. Desambiguación de homónimos o múltiples citas futuras:** Cuando `resolver_cita_medico` encuentre más de una cita activa que coincida con el nombre del paciente (dos pacientes con el mismo nombre o un mismo paciente con varias citas futuras), devolver la lista de coincidencias para que el médico confirme cuál desea modificar/cobrar.
 - [ ] **5. Cerrar/Desactivar días de la semana (`cerrar_dias`):** Añadir soporte en `configurar_horario_base_y_perfil` para desactivar por completo un día de la semana que antes estaba habilitado (ej. dejar de atender los sábados).
-
----
-
-## 🌐 Tareas Cross-Repo y Despliegue (API Gateway & Railway — Pendientes de Infraestructura Externa)
-- [ ] Programar en el repositorio del **API Gateway** el endpoint `POST /webhooks/{provider}/{app_id}` según el contrato de `SPEC.md` y [`paso_prod.md`](./paso_prod.md).
-- [ ] Aprovisionar en **Railway** PostgreSQL, Redis, el servicio Web (`asistente-citas-api`), el Worker (`asistente-citas-worker`) y registrar el webhook en Telegram siguiendo [`paso_prod.md`](./paso_prod.md).
 
 ---
 
