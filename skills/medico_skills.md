@@ -19,7 +19,7 @@ Obtiene la lista cronológica de citas del médico para un día o rango de fecha
 ---
 
 ## 2. `bloquear_horario_agenda`
-Registra una excepción en `BLOQUEOS_AGENDA` por vacaciones, congreso o tarde libre para que esos horarios dejen de ofrecerse inmediatamente a los pacientes.
+Registra una excepción en `BLOQUEOS_AGENDA` por vacaciones, congreso o tarde libre para que esos horarios dejen de ofrecerse inmediatamente a los pacientes, o elimina bloqueos existentes (`accion="DESBLOQUEAR"`) para reabrir la agenda.
 
 * **Permiso requerido:** `agenda:bloquear_horario`
 * **Parámetros expuestos al LLM:**
@@ -29,20 +29,25 @@ Registra una excepción en `BLOQUEOS_AGENDA` por vacaciones, congreso o tarde li
   * `hora_fin` (`str`, requerido): `HH:MM` (usar `"23:59"` para día completo).
   * `motivo` (`str`, opcional): Ej. `"Tarde libre"`, `"Congreso médico"`.
   * `forzar_con_citas` (`bool`, opcional, default `False`): Si es `True`, registra el bloqueo incluso si existen citas confirmadas en ese rango (tras haber advertido al médico).
+  * `accion` (`str`, opcional, default `"BLOQUEAR"`): `"BLOQUEAR"` para crear un bloqueo o `"DESBLOQUEAR"` para eliminar bloqueos existentes en ese rango y reabrir la disponibilidad.
 * **Parámetros inyectados por Gateway:** `profesional_usuario_id = X-User-Id`
 * **Reglas de negocio:**
-  * Antes de bloquear, verifica si ya existen `CITAS` confirmadas en ese rango. Si existen y `forzar_con_citas == False`, devuelve la advertencia con la lista de pacientes afectados para que el médico decida si desea reprogramarlos o forzar el bloqueo (`forzar_con_citas = True`).
+  * En `"BLOQUEAR"`, antes de bloquear verifica si ya existen `CITAS` confirmadas en ese rango. Si existen y `forzar_con_citas == False`, devuelve la advertencia con la lista de pacientes afectados.
+  * En `"DESBLOQUEAR"`, elimina los registros de `BLOQUEOS_AGENDA` que se solapen con el rango indicado y devuelve `"code": "SLOT_UNBLOCKED"`.
 
 ---
 
 ## 3. `configurar_horario_base_y_perfil`
-Actualiza la jornada semanal recurrente del médico (`HORARIOS_BASE`), la duración de sus consultas, su tarifa base o la hora a la que desea recibir su resumen diario (`AGENDA_HOY` o `AGENDA_MANANA`).
+Actualiza la jornada semanal recurrente del médico (`HORARIOS_BASE`), permite cerrar/desactivar días de la semana, o cambiar la duración de sus consultas, su tarifa base o la hora a la que desea recibir su resumen diario (`AGENDA_HOY` o `AGENDA_MANANA`).
 
 * **Permiso requerido:** `agenda:configurar_perfil`
 * **Parámetros expuestos al LLM:**
-  * `dias_semana` (`list[int]`, opcional): Lista de días (`1`=Lunes ... `6`=Sábado, `0`=Domingo). Solo actualiza/reemplaza los días incluidos en esta lista, conservando intactos los demás días de la semana que el médico ya tuviera configurados.
-  * `hora_apertura` (`str`, opcional): Formato `HH:MM`.
-  * `hora_cierre` (`str`, opcional): Formato `HH:MM`.
+  * `dias_semana` (`list[int]`, opcional): Lista de días a abrir/configurar (`1`=Lunes ... `6`=Sábado, `0`=Domingo). Solo actualiza/reemplaza los días incluidos en esta lista, conservando intactos los demás días de la semana.
+  * `hora_apertura` (`str`, opcional): Formato `HH:MM` (primer turno o jornada continua).
+  * `hora_cierre` (`str`, opcional): Formato `HH:MM` (primer turno o jornada continua).
+  * `hora_apertura_2` (`str`, opcional): Formato `HH:MM` (inicio del segundo turno en caso de jornada partida con hora de almuerzo).
+  * `hora_cierre_2` (`str`, opcional): Formato `HH:MM` (fin del segundo turno en caso de jornada partida).
+  * `dias_cerrados` (`list[int]`, opcional): Lista de días (`1`=Lunes ... `6`=Sábado, `0`=Domingo) que el médico desea cerrar/desactivar por completo sin necesidad de pasar `hora_apertura`/`hora_cierre`.
   * `duracion_cita_minutos` (`int`, opcional): Ej. `30`, `45`, `60`.
   * `tarifa_base_consulta` (`float`, opcional): Precio por defecto de la consulta.
   * `hora_resumen_diario` (`str`, opcional): Hora en punto en formato `HH:00` (ej. `"08:00"`, `"12:00"`, `"20:00"`).

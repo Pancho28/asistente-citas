@@ -108,6 +108,9 @@ async def configurar_horario_base_y_perfil(
     dias_semana: list[int] | None = None,
     hora_apertura: time | None = None,
     hora_cierre: time | None = None,
+    hora_apertura_2: time | None = None,
+    hora_cierre_2: time | None = None,
+    dias_cerrados: list[int] | None = None,
     duracion_cita_minutos: int | None = None,
     tarifa_base_consulta: Decimal | None = None,
     hora_resumen_diario: time | None = None,
@@ -115,6 +118,8 @@ async def configurar_horario_base_y_perfil(
 ) -> PerfilProfesional:
     """
     Actualiza la configuración del perfil y la jornada semanal base del médico.
+    Permite abrir/modificar días con uno o dos tramos (jornada partida con hora_apertura_2/hora_cierre_2)
+    y cerrar días completos (dias_cerrados) de forma incremental.
     """
     stmt = (
         select(PerfilProfesional)
@@ -135,6 +140,12 @@ async def configurar_horario_base_y_perfil(
     if alcance_resumen_diario is not None:
         perfil.alcance_resumen_diario = alcance_resumen_diario
 
+    # Cerrar días completos sin necesidad de horas de apertura/cierre
+    if dias_cerrados:
+        for hb in perfil.horarios_base:
+            if hb.dia_semana in dias_cerrados:
+                hb.activo = False
+
     # Si se especificaron días y horas de apertura/cierre, actualizar jornada base de forma incremental
     if dias_semana and hora_apertura and hora_cierre:
         # Desactivar únicamente los horarios de los días indicados en dias_semana
@@ -151,6 +162,16 @@ async def configurar_horario_base_y_perfil(
                 activo=True,
             )
             db.add(nuevo_hb)
+
+            if hora_apertura_2 and hora_cierre_2:
+                segundo_hb = HorarioBase(
+                    profesional_id=perfil.id,
+                    dia_semana=dia,
+                    hora_inicio=hora_apertura_2,
+                    hora_fin=hora_cierre_2,
+                    activo=True,
+                )
+                db.add(segundo_hb)
 
     await db.commit()
     await db.refresh(perfil)

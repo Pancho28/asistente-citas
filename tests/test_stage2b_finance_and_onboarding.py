@@ -289,3 +289,125 @@ async def test_doctor_payment_by_patient_name_and_incremental_schedule(async_ses
     dias_activos = sorted(hb.dia_semana for hb in activos)
     assert dias_activos == [1, 2, 3, 4, 5, 6]
 
+
+@pytest.mark.asyncio
+async def test_doctor_close_specific_days_in_schedule(async_session):
+    medico = Usuario(
+        id=uuid.uuid4(),
+        canal_origen="TELEGRAM",
+        external_chat_id="doc_close_days_8",
+        nombre_completo="Dr. Cuddy Schedule",
+        rol_sistema="MEDICO",
+        modo_vista_actual="MEDICO",
+    )
+    async_session.add(medico)
+    await async_session.commit()
+
+    perfil = PerfilProfesional(
+        id=uuid.uuid4(),
+        usuario_id=medico.id,
+        especialidad="Administración Médica",
+        tarifa_base_consulta=Decimal("60.00"),
+    )
+    async_session.add(perfil)
+    await async_session.commit()
+
+    # 1. Configurar Lunes a Sábado (1..6)
+    await configurar_horario_base_y_perfil(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        dias_semana=[1, 2, 3, 4, 5, 6],
+        hora_apertura=time(9, 0),
+        hora_cierre=time(13, 0),
+    )
+
+    # 2. Cerrar únicamente los sábados (6) sin pasar hora_apertura ni hora_cierre
+    await configurar_horario_base_y_perfil(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        dias_cerrados=[6],
+    )
+
+    stmt_activos = select(HorarioBase).where(
+        HorarioBase.profesional_id == perfil.id,
+        HorarioBase.activo.is_(True),
+    )
+    activos = (await async_session.execute(stmt_activos)).scalars().all()
+    assert sorted(hb.dia_semana for hb in activos) == [1, 2, 3, 4, 5]
+
+    # 3. En la misma llamada: abrir domingo (0) y cerrar viernes (5)
+    await configurar_horario_base_y_perfil(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        dias_semana=[0],
+        hora_apertura=time(10, 0),
+        hora_cierre=time(14, 0),
+        dias_cerrados=[5],
+    )
+
+    activos_2 = (await async_session.execute(stmt_activos)).scalars().all()
+    assert sorted(hb.dia_semana for hb in activos_2) == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_doctor_split_shift_schedule_generation(async_session):
+    from src.services.availability_service import consultar_disponibilidad
+    from src.services.appointment_service import _formatear_horario_semanal
+    from tests.conftest import FakeRedis
+
+    fake_redis = FakeRedis()
+    medico = Usuario(
+        id=uuid.uuid4(),
+        canal_origen="TELEGRAM",
+        external_chat_id="doc_split_9",
+        nombre_completo="Dr. House Split",
+        rol_sistema="MEDICO",
+        modo_vista_actual="MEDICO",
+        activo=True,
+    )
+    async_session.add(medico)
+    await async_session.commit()
+
+    perfil = PerfilProfesional(
+        id=uuid.uuid4(),
+        usuario_id=medico.id,
+        especialidad="Cardiología",
+        duracion_cita_minutos=30,
+        tarifa_base_consulta=Decimal("75.00"),
+        acepta_nuevas_citas=True,
+    )
+    async_session.add(perfil)
+    await async_session.commit()
+
+    # Configurar Lunes (1) con jornada partida: 08:00-10:00 y 14:00-16:00
+    await configurar_horario_base_y_perfil(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        dias_semana=[1],
+        hora_apertura=time(8, 0),
+        hora_cierre=time(10, 0),
+        hora_apertura_2=time(14, 0),
+        hora_cierre_2=time(16, 0),
+    )
+
+    stmt_activos = select(HorarioBase).where(
+        HorarioBase.profesional_id == perfil.id,
+        HorarioBase.activo.is_(True),
+    )
+    activos = list((await async_session.execute(stmt_activos)).scalars().all())
+    assert len(activos) == 2
+
+    resumen = _formatear_horario_semanal(activos)
+    assert "Lunes de 08:00 a 10:00 y de 14:00 a 16:00" in resumen
+
+    disp = await consultar_disponibilidad(
+        db=async_session,
+        redis_client=fake_redis,
+        fecha=date(2026, 11, 23),  # Lunes
+        profesional_id=perfil.id,
+    )
+    assert disp.horarios_libres == [
+        "08:00", "08:30", "09:00", "09:30",
+        "14:00", "14:30", "15:00", "15:30",
+    ]
+

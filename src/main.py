@@ -1,8 +1,23 @@
+import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from src.core.config import get_settings
 from src.core.exceptions import AppError
 from src.api.v1 import api_v1_router
+
+def _configure_app_logging() -> None:
+    """Configura logs INFO únicamente para módulos propios (src.*) sin saturar con librerías HTTP."""
+    app_logger = logging.getLogger("src")
+    app_logger.setLevel(logging.INFO)
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s\n")
+        )
+        app_logger.addHandler(handler)
+
+
+_configure_app_logging()
 
 settings = get_settings()
 

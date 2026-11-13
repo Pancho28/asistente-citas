@@ -518,3 +518,266 @@ async def test_patient_cancel_without_uuid_and_out_of_hours_validation(async_ses
     )
     assert cita_cancelada.id == nueva_cita.id
     assert cita_cancelada.estado == "CANCELADA"
+
+
+@pytest.mark.asyncio
+async def test_doctor_unblock_schedule_restores_availability(async_session):
+    fake_redis = FakeRedis()
+
+    medico = Usuario(
+        id=uuid.uuid4(),
+        canal_origen="TELEGRAM",
+        external_chat_id="doc_unblock_8",
+        nombre_completo="Dr. House Unblock",
+        rol_sistema="MEDICO",
+        modo_vista_actual="MEDICO",
+        activo=True,
+    )
+    async_session.add(medico)
+    await async_session.commit()
+
+    perfil = PerfilProfesional(
+        id=uuid.uuid4(),
+        usuario_id=medico.id,
+        especialidad="Diagnóstico",
+        duracion_cita_minutos=30,
+        tarifa_base_consulta=Decimal("60.00"),
+        acepta_nuevas_citas=True,
+    )
+    async_session.add(perfil)
+    await async_session.commit()
+
+    async_session.add(
+        HorarioBase(
+            profesional_id=perfil.id,
+            dia_semana=1,
+            hora_inicio=time(9, 0),
+            hora_fin=time(12, 0),
+            activo=True,
+        )
+    )
+    await async_session.commit()
+
+    lunes_futuro = date(2026, 11, 23)
+
+    # 1. Bloquear de 09:00 a 11:00
+    res_block = await bloquear_horario_agenda(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        fecha_hora_inicio=datetime(2026, 11, 23, 9, 0, tzinfo=timezone.utc),
+        fecha_hora_fin=datetime(2026, 11, 23, 11, 0, tzinfo=timezone.utc),
+        motivo="Junta médica",
+    )
+    assert res_block["success"] is True
+
+    disp_bloqueada = await consultar_disponibilidad(
+        db=async_session,
+        redis_client=fake_redis,
+        fecha=lunes_futuro,
+        profesional_id=perfil.id,
+    )
+    assert disp_bloqueada.horarios_libres == ["11:00", "11:30"]
+
+    # 2. Desbloquear el rango 09:00 a 11:00
+    res_unblock = await bloquear_horario_agenda(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        fecha_hora_inicio=datetime(2026, 11, 23, 9, 0, tzinfo=timezone.utc),
+        fecha_hora_fin=datetime(2026, 11, 23, 11, 0, tzinfo=timezone.utc),
+        accion="DESBLOQUEAR",
+    )
+    assert res_unblock["success"] is True
+    assert res_unblock["code"] == "SLOT_UNBLOCKED"
+    assert res_unblock["bloqueos_eliminados"] == 1
+
+    # 3. Verificar que la disponibilidad completa fue restaurada
+    disp_restaurada = await consultar_disponibilidad(
+        db=async_session,
+        redis_client=fake_redis,
+        fecha=lunes_futuro,
+        profesional_id=perfil.id,
+    )
+    assert disp_restaurada.horarios_libres == [
+        "09:00", "09:30", "10:00", "10:30", "11:00", "11:30"
+    ]
+
+    # 4. Intentar desbloquear de nuevo cuando no hay bloqueos -> NO_BLOCKS_FOUND
+    res_empty = await bloquear_horario_agenda(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        fecha_hora_inicio=datetime(2026, 11, 23, 9, 0, tzinfo=timezone.utc),
+        fecha_hora_fin=datetime(2026, 11, 23, 11, 0, tzinfo=timezone.utc),
+        accion="DESBLOQUEAR",
+    )
+    assert res_empty["success"] is False
+    assert res_empty["code"] == "NO_BLOCKS_FOUND"
+    assert res_empty["bloqueos_eliminados"] == 0
+
+
+@pytest.mark.asyncio
+async def test_doctor_disambiguation_on_homonym_patients(async_session):
+    medico = Usuario(
+        id=uuid.uuid4(),
+        canal_origen="TELEGRAM",
+        external_chat_id="doc_homonym_9",
+        nombre_completo="Dr. House Homónimos",
+        rol_sistema="MEDICO",
+        modo_vista_actual="MEDICO",
+        activo=True,
+    )
+    async_session.add(medico)
+    await async_session.commit()
+
+    perfil = PerfilProfesional(
+        id=uuid.uuid4(),
+        usuario_id=medico.id,
+        especialidad="Medicina Interna",
+        duracion_cita_minutos=30,
+        tarifa_base_consulta=Decimal("50.00"),
+    )
+    async_session.add(perfil)
+    await async_session.commit()
+
+    # Crear 2 pacientes con nombre "Carlos"
+    c1 = await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="CREAR",
+        fecha_destino=date(2026, 11, 24),
+        hora_destino=time(9, 0),
+        nombre_paciente="Carlos Pérez",
+    )
+    c2 = await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="CREAR",
+        fecha_destino=date(2026, 11, 24),
+        hora_destino=time(10, 0),
+        nombre_paciente="Carlos Gómez",
+    )
+
+    # Buscar por "Carlos" debe exigir desambiguación con ValidationError mostrando ambas opciones
+    with pytest.raises(ValidationError) as exc_info:
+        await agendar_o_mover_cita_manual_medico(
+            db=async_session,
+            profesional_usuario_id=medico.id,
+            accion="CANCELAR",
+            nombre_paciente="Carlos",
+        )
+    msg = exc_info.value.message
+    assert "Carlos Pérez" in msg
+    assert "Carlos Gómez" in msg
+    assert str(c1.id) in msg
+    assert str(c2.id) in msg
+
+    # Al elegir uno por su cita_id específico, sí cancela ese y deja intacto el otro
+    cancelada = await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="CANCELAR",
+        cita_id=c2.id,
+    )
+    assert cancelada.id == c2.id
+    assert cancelada.estado == "CANCELADA"
+
+    await async_session.refresh(c1)
+    assert c1.estado == "CONFIRMADA"
+
+
+@pytest.mark.asyncio
+async def test_realtime_cross_notifications_between_doctor_and_patient(async_session, monkeypatch):
+    fake_redis = FakeRedis()
+    sent_notifications: list[tuple[str, str]] = []
+
+    async def fake_send_message(self, recipient: str | None = None, text: str = "", **kwargs) -> bool:
+        target = recipient or kwargs.get("chat_id") or kwargs.get("phone_number") or ""
+        sent_notifications.append((str(target), text))
+        return True
+
+    from src.adapters.telegram import TelegramAdapter
+    monkeypatch.setattr(TelegramAdapter, "send_message", fake_send_message)
+
+    medico = Usuario(
+        id=uuid.uuid4(),
+        canal_origen="TELEGRAM",
+        external_chat_id="doc_notif_9",
+        nombre_completo="Dr. Pérez Notif",
+        rol_sistema="MEDICO",
+        modo_vista_actual="MEDICO",
+        activo=True,
+    )
+    paciente = Usuario(
+        id=uuid.uuid4(),
+        canal_origen="TELEGRAM",
+        external_chat_id="pac_notif_9",
+        nombre_completo="Sofía Rivas",
+        rol_sistema="PACIENTE",
+        modo_vista_actual="PACIENTE",
+        activo=True,
+    )
+    async_session.add_all([medico, paciente])
+    await async_session.commit()
+
+    perfil = PerfilProfesional(
+        id=uuid.uuid4(),
+        usuario_id=medico.id,
+        especialidad="Dermatología",
+        duracion_cita_minutos=30,
+        tarifa_base_consulta=Decimal("60.00"),
+        min_horas_anticipacion_cancelar=2,
+        acepta_nuevas_citas=True,
+    )
+    async_session.add(perfil)
+    await async_session.commit()
+
+    # 1. Paciente agenda -> debe notificar al chat del médico
+    cita = await agendar_cita_paciente(
+        db=async_session,
+        redis_client=fake_redis,
+        paciente_id=paciente.id,
+        fecha=date(2026, 11, 25),
+        hora=time(10, 0),
+        nombre_completo_paciente="Sofía Rivas",
+        profesional_id=perfil.id,
+    )
+    assert any(target == "doc_notif_9" and "Sofía Rivas" in txt for target, txt in sent_notifications)
+    sent_notifications.clear()
+
+    # 2. Médico mueve manualmente la cita -> debe notificar al chat del paciente
+    await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="MOVER",
+        cita_id=cita.id,
+        fecha_destino=date(2026, 11, 25),
+        hora_destino=time(15, 0),
+    )
+    assert any(target == "pac_notif_9" and "15:00" in txt for target, txt in sent_notifications)
+    sent_notifications.clear()
+
+    # 3. Médico cancela manualmente la cita -> debe notificar al chat del paciente
+    await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="CANCELAR",
+        cita_id=cita.id,
+    )
+    assert any(target == "pac_notif_9" and "cancel" in txt.lower() for target, txt in sent_notifications)
+    sent_notifications.clear()
+
+    # 4. Cita manual con paciente sin chat real ("manual_...") no debe enviar notificación
+    cita_manual = await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="CREAR",
+        fecha_destino=date(2026, 11, 26),
+        hora_destino=time(11, 0),
+        nombre_paciente="Paciente Externo",
+    )
+    await agendar_o_mover_cita_manual_medico(
+        db=async_session,
+        profesional_usuario_id=medico.id,
+        accion="CANCELAR",
+        cita_id=cita_manual.id,
+    )
+    assert sent_notifications == []

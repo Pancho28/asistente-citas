@@ -69,15 +69,22 @@ async def bloquear_horario_agenda(
     hora_fin: str,
     motivo: str | None = None,
     forzar_con_citas: bool = False,
+    accion: str = "BLOQUEAR",
 ) -> dict[str, Any]:
     """
-    Registra un bloqueo temporal en la agenda del médico (vacaciones, congreso, imprevisto).
+    Registra un bloqueo temporal en la agenda del médico ('BLOQUEAR') o elimina bloqueos
+    existentes en ese rango para reabrir la disponibilidad ('DESBLOQUEAR').
     Las fechas deben ser YYYY-MM-DD y las horas HH:MM.
-    Si existen citas confirmadas en ese rango y forzar_con_citas es False, advierte con la lista de citas afectadas;
-    usa forzar_con_citas=True únicamente cuando el médico confirme que desea bloquear de todas formas.
+    En 'BLOQUEAR', si existen citas confirmadas en ese rango y forzar_con_citas es False,
+    advierte con la lista de citas afectadas; usa forzar_con_citas=True únicamente cuando
+    el médico confirme que desea bloquear de todas formas.
     """
     ctx = current_user_ctx.get()
     db = current_db_session.get()
+
+    act = accion.upper()
+    if act not in ("BLOQUEAR", "DESBLOQUEAR"):
+        return {"success": False, "code": "INVALID_ACTION", "message": "Acción debe ser 'BLOQUEAR' o 'DESBLOQUEAR'"}
 
     try:
         dt_inicio = datetime.fromisoformat(f"{fecha_inicio}T{hora_inicio}:00").replace(tzinfo=timezone.utc)
@@ -93,6 +100,7 @@ async def bloquear_horario_agenda(
             fecha_hora_fin=dt_fin,
             motivo=motivo,
             forzar_con_citas=forzar_con_citas,
+            accion=act,  # type: ignore
         )
         return res
     except (EntityNotFoundError, ValidationError, AppError) as exc:
@@ -104,21 +112,30 @@ async def configurar_horario_base_y_perfil(
     dias_semana: list[int] | None = None,
     hora_apertura: str | None = None,
     hora_cierre: str | None = None,
+    hora_apertura_2: str | None = None,
+    hora_cierre_2: str | None = None,
+    dias_cerrados: list[int] | None = None,
     duracion_cita_minutos: int | None = None,
     tarifa_base_consulta: float | None = None,
     hora_resumen_diario: str | None = None,
     alcance_resumen_diario: str | None = None,
 ) -> dict[str, Any]:
     """
-    Actualiza la jornada semanal, duración de citas, tarifa base u hora de resumen diario del médico.
-    dias_semana: lista de enteros (1=Lunes ... 6=Sábado, 0=Domingo).
-    hora_apertura / hora_cierre: formato HH:MM.
+    Actualiza la jornada semanal (continua o partida con horario de almuerzo), cierra días completos,
+    o cambia duración de citas, tarifa base u hora de resumen diario del médico.
+    dias_semana: lista de enteros a habilitar/modificar (1=Lunes ... 6=Sábado, 0=Domingo).
+    hora_apertura / hora_cierre: formato HH:MM (primer turno o jornada continua).
+    hora_apertura_2 / hora_cierre_2: formato HH:MM (segundo turno opcional para jornada partida).
+    dias_cerrados: lista de enteros de días que el médico desea cerrar/desactivar por completo
+    (1=Lunes ... 6=Sábado, 0=Domingo), sin necesidad de indicar horas.
     """
     ctx = current_user_ctx.get()
     db = current_db_session.get()
 
     parsed_apertura = time.fromisoformat(hora_apertura) if hora_apertura else None
     parsed_cierre = time.fromisoformat(hora_cierre) if hora_cierre else None
+    parsed_apertura_2 = time.fromisoformat(hora_apertura_2) if hora_apertura_2 else None
+    parsed_cierre_2 = time.fromisoformat(hora_cierre_2) if hora_cierre_2 else None
     parsed_resumen = time.fromisoformat(hora_resumen_diario) if hora_resumen_diario else None
     tarifa_dec = Decimal(str(tarifa_base_consulta)) if tarifa_base_consulta is not None else None
 
@@ -129,6 +146,9 @@ async def configurar_horario_base_y_perfil(
             dias_semana=dias_semana,
             hora_apertura=parsed_apertura,
             hora_cierre=parsed_cierre,
+            hora_apertura_2=parsed_apertura_2,
+            hora_cierre_2=parsed_cierre_2,
+            dias_cerrados=dias_cerrados,
             duracion_cita_minutos=duracion_cita_minutos,
             tarifa_base_consulta=tarifa_dec,
             hora_resumen_diario=parsed_resumen,

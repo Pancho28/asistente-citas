@@ -66,7 +66,7 @@ def build_system_prompt(
             "",
             "=== DIRECTRICES PARA ROL MÉDICO ===",
             "1. Eres el asistente de gestión clínica y financiera del profesional de la salud.",
-            "2. Puedes consultar la agenda del día, bloquear horarios por imprevistos (si hay citas y el médico confirma, usa forzar_con_citas=True), agendar, mover o cancelar citas manualmente (identificando la cita por UUID o por nombre del paciente), registrar cobros/descuentos por nombre del paciente y ver reportes de ganancias.",
+            "2. Puedes consultar la agenda del día, bloquear o desbloquear horarios (si hay citas al bloquear y el médico confirma, usa forzar_con_citas=True; para reabrir un rango bloqueado, usa accion='DESBLOQUEAR'), modificar horarios (incluyendo jornada partida con hora_apertura_2/hora_cierre_2) o cerrar días completos de atención (dias_cerrados), agendar, mover o cancelar citas manualmente (identificando la cita por UUID o por nombre del paciente; si existen múltiples coincidencias, pregunta al médico cuál corresponde), registrar cobros/descuentos por nombre del paciente y ver reportes de ganancias.",
             "3. Proporciona resúmenes ejecutivos, claros y estructurados con montos exactos y horas de atención.",
         ])
 

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from uuid import UUID
 from datetime import date, time, datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from src.models.user import PerfilProfesional, Usuario
 from src.models.schedule import HorarioBase, BloqueoAgenda
 from src.models.appointment import Cita
+from src.adapters.telegram import TelegramAdapter
+from src.adapters.whatsapp import WhatsAppAdapter
 from src.core.exceptions import (
     EntityNotFoundError,
     SlotTakenError,
@@ -21,6 +24,8 @@ from src.core.exceptions import (
 from src.core.redis import acquire_slot_lock, release_slot_lock
 from src.core.config import now_tz
 from src.services.availability_service import _normalize_text
+
+logger = logging.getLogger(__name__)
 
 DIAS_SEMANA_ORDENADOS: list[tuple[int, str]] = [
     (1, "Lunes"),
@@ -34,23 +39,47 @@ DIAS_SEMANA_ORDENADOS: list[tuple[int, str]] = [
 
 
 def _formatear_horario_semanal(horarios_activos: list[HorarioBase]) -> str:
-    """Formatea los bloques de HorarioBase activos en un texto legible agrupado por rango de horas."""
+    """Formatea los bloques de HorarioBase activos en texto legible, soportando jornada partida."""
     if not horarios_activos:
         return "Sin horario configurado"
 
-    grupos: dict[tuple[str, str], list[str]] = {}
-    por_dia = {hb.dia_semana: hb for hb in horarios_activos if hb.activo}
-    for dia_num, dia_nombre in DIAS_SEMANA_ORDENADOS:
-        hb = por_dia.get(dia_num)
-        if hb:
-            rango = (hb.hora_inicio.strftime("%H:%M"), hb.hora_fin.strftime("%H:%M"))
-            grupos.setdefault(rango, []).append(dia_nombre)
+    por_dia: dict[int, list[HorarioBase]] = {}
+    for hb in horarios_activos:
+        if hb.activo:
+            por_dia.setdefault(hb.dia_semana, []).append(hb)
 
-    partes = [
-        f"{', '.join(dias)} de {inicio} a {fin}"
-        for (inicio, fin), dias in grupos.items()
-    ]
+    grupos: dict[str, list[str]] = {}
+    for dia_num, dia_nombre in DIAS_SEMANA_ORDENADOS:
+        bloques = sorted(por_dia.get(dia_num, []), key=lambda b: b.hora_inicio)
+        if bloques:
+            tramos = " y ".join(
+                f"de {b.hora_inicio.strftime('%H:%M')} a {b.hora_fin.strftime('%H:%M')}"
+                for b in bloques
+            )
+            grupos.setdefault(tramos, []).append(dia_nombre)
+
+    partes = [f"{', '.join(dias)} {tramos}" for tramos, dias in grupos.items()]
     return "; ".join(partes)
+
+
+async def _notificar_usuario_directo(usuario: Usuario | None, texto: str) -> None:
+    """
+    Envía una notificación proactiva directa al canal del usuario (best-effort).
+    Nunca propaga excepciones para no afectar transacciones de base de datos.
+    """
+    if not usuario or not usuario.external_chat_id:
+        return
+    if str(usuario.external_chat_id).startswith("manual_"):
+        return
+    try:
+        adapter = (
+            TelegramAdapter()
+            if usuario.canal_origen == "TELEGRAM"
+            else WhatsAppAdapter()
+        )
+        await adapter.send_message(recipient=usuario.external_chat_id, text=texto)
+    except Exception as exc:
+        logger.warning("[NOTIF] Error enviando notificación a %s: %s", usuario.id, exc)
 
 
 def _parse_uuid_safe(value: UUID | str | None) -> UUID | None:
@@ -91,10 +120,11 @@ async def resolver_cita_medico(
     perfil_id: UUID,
     cita_id_or_query: UUID | str | None = None,
     nombre_paciente: str | None = None,
+    fecha_referencia: date | None = None,
 ) -> Cita:
     """
     Resuelve una cita del médico por UUID exacto o por coincidencia flexible del nombre del paciente.
-    Prioriza la cita próxima/reciente sobre citas antiguas.
+    Si hay múltiples citas activas que coinciden (homónimos o varias citas futuras), exige desambiguación.
     """
     parsed_uuid = _parse_uuid_safe(cita_id_or_query)
     if parsed_uuid is not None:
@@ -132,6 +162,11 @@ async def resolver_cita_medico(
     if not coincidencias:
         raise EntityNotFoundError("Cita médica")
 
+    if fecha_referencia is not None:
+        en_fecha = [c for c in coincidencias if c.fecha_hora_inicio.date() == fecha_referencia]
+        if en_fecha:
+            coincidencias = en_fecha
+
     ventana_reciente = now_tz() - timedelta(hours=2)
     proximas = [
         c
@@ -143,7 +178,27 @@ async def resolver_cita_medico(
         )
         >= ventana_reciente
     ]
-    return proximas[0] if proximas else coincidencias[-1]
+    candidatas = proximas if proximas else [coincidencias[-1]]
+
+    if len(candidatas) > 1:
+        exactas = [
+            c for c in candidatas
+            if _normalize_text(c.paciente.nombre_completo or "") == query_norm
+        ]
+        if len(exactas) == 1:
+            return exactas[0]
+
+        opciones = [
+            f"- {c.paciente.nombre_completo} el {c.fecha_hora_inicio.strftime('%Y-%m-%d a las %H:%M')} (cita_id: {c.id})"
+            for c in candidatas
+        ]
+        raise ValidationError(
+            "Existen múltiples citas activas que coinciden con ese nombre:\n"
+            + "\n".join(opciones)
+            + "\nPor favor pregúntale al médico a cuál se refiere y vuelve a invocar la herramienta usando el cita_id exacto."
+        )
+
+    return candidatas[0]
 
 
 async def agendar_cita_paciente(
@@ -156,6 +211,7 @@ async def agendar_cita_paciente(
     motivo_consulta: str | None = None,
     profesional_id: UUID | str | None = None,
     origen_creacion: Literal["IA_TEXTO", "BOTON_RAPIDO"] = "IA_TEXTO",
+    _notificar: bool = True,
 ) -> Cita:
     """
     Aparta un bloqueo atómico en Redis, valida disponibilidad e inserta la cita en PostgreSQL.
@@ -293,6 +349,17 @@ async def agendar_cita_paciente(
         await db.rollback()
         raise SlotTakenError()
 
+    if _notificar:
+        nombre_pac = (
+            (usuario_paciente.nombre_completo if usuario_paciente else None)
+            or nombre_completo_paciente
+            or "Un paciente"
+        )
+        await _notificar_usuario_directo(
+            perfil.usuario,
+            f"📅 Nueva cita agendada: {nombre_pac} para el {fecha.isoformat()} a las {slot_str}.",
+        )
+
     return nueva_cita
 
 
@@ -336,14 +403,20 @@ async def cancelar_o_reagendar_cita_paciente(
     if parsed_uuid is not None:
         stmt = (
             select(Cita)
-            .options(selectinload(Cita.profesional), selectinload(Cita.paciente))
+            .options(
+                selectinload(Cita.profesional).selectinload(PerfilProfesional.usuario),
+                selectinload(Cita.paciente),
+            )
             .where(Cita.id == parsed_uuid, Cita.paciente_id == paciente_id)
         )
         cita = (await db.execute(stmt)).scalars().first()
     else:
         stmt_activas = (
             select(Cita)
-            .options(selectinload(Cita.profesional), selectinload(Cita.paciente))
+            .options(
+                selectinload(Cita.profesional).selectinload(PerfilProfesional.usuario),
+                selectinload(Cita.paciente),
+            )
             .where(
                 Cita.paciente_id == paciente_id,
                 Cita.estado.in_(["CONFIRMADA", "CONFIRMADA_PACIENTE"]),
@@ -387,6 +460,14 @@ async def cancelar_o_reagendar_cita_paciente(
         await release_slot_lock(redis_client, cita.profesional_id, slot_str, paciente_id)
         await db.commit()
         await db.refresh(cita)
+
+        nombre_pac = (cita.paciente.nombre_completo if cita.paciente else None) or "Un paciente"
+        medico_user = cita.profesional.usuario if cita.profesional else None
+        await _notificar_usuario_directo(
+            medico_user,
+            f"❌ Cita cancelada por el paciente {nombre_pac} "
+            f"({cita.fecha_hora_inicio.strftime('%Y-%m-%d')} a las {cita.fecha_hora_inicio.strftime('%H:%M')}).",
+        )
         return cita
 
     elif accion == "REAGENDAR":
@@ -395,7 +476,9 @@ async def cancelar_o_reagendar_cita_paciente(
 
         # Cancelar cita actual y liberar lock en Redis del horario anterior
         slot_str_viejo = cita.fecha_hora_inicio.strftime("%Y-%m-%d_%H:%M")
+        fecha_vieja_fmt = cita.fecha_hora_inicio.strftime("%Y-%m-%d %H:%M")
         nombre_paciente_actual = (cita.paciente.nombre_completo if cita.paciente else None) or "Paciente"
+        medico_user = cita.profesional.usuario if cita.profesional else None
         cita.estado = "CANCELADA"
         cita.estado_financiero = "EXONERADO"
         await release_slot_lock(redis_client, cita.profesional_id, slot_str_viejo, paciente_id)
@@ -412,6 +495,12 @@ async def cancelar_o_reagendar_cita_paciente(
             motivo_consulta=cita.motivo_consulta,
             profesional_id=cita.profesional_id,
             origen_creacion="IA_TEXTO",
+            _notificar=False,
+        )
+        await _notificar_usuario_directo(
+            medico_user,
+            f"🔄 Cita reagendada por el paciente {nombre_paciente_actual}: "
+            f"de {fecha_vieja_fmt} a {nueva_fecha.isoformat()} {nueva_hora.strftime('%H:%M')}.",
         )
         return nueva_cita
 
@@ -425,10 +514,13 @@ async def bloquear_horario_agenda(
     fecha_hora_fin: datetime,
     motivo: str | None = None,
     forzar_con_citas: bool = False,
+    accion: Literal["BLOQUEAR", "DESBLOQUEAR"] = "BLOQUEAR",
 ) -> dict[str, Any]:
     """
-    Registra una excepción en BLOQUEOS_AGENDA. Si existen citas confirmadas en el rango,
-    advierte al profesional con la lista de pacientes afectados a menos que se fuerce.
+    Registra una excepción en BLOQUEOS_AGENDA ('BLOQUEAR') o elimina bloqueos
+    existentes en el rango indicado ('DESBLOQUEAR').
+    En 'BLOQUEAR', si existen citas confirmadas en el rango, advierte al profesional
+    con la lista de pacientes afectados a menos que forzar_con_citas sea True.
     """
     stmt_prof = select(PerfilProfesional).where(PerfilProfesional.usuario_id == profesional_usuario_id)
     res_prof = await db.execute(stmt_prof)
@@ -440,6 +532,33 @@ async def bloquear_horario_agenda(
         fecha_hora_inicio = fecha_hora_inicio.replace(tzinfo=timezone.utc)
     if fecha_hora_fin.tzinfo is None:
         fecha_hora_fin = fecha_hora_fin.replace(tzinfo=timezone.utc)
+
+    if accion == "DESBLOQUEAR":
+        stmt_bloq = select(BloqueoAgenda).where(
+            BloqueoAgenda.profesional_id == perfil.id,
+            BloqueoAgenda.fecha_hora_inicio < fecha_hora_fin,
+            BloqueoAgenda.fecha_hora_fin > fecha_hora_inicio,
+        )
+        bloqueos = list((await db.execute(stmt_bloq)).scalars().all())
+        if not bloqueos:
+            return {
+                "success": False,
+                "code": "NO_BLOCKS_FOUND",
+                "bloqueos_eliminados": 0,
+                "mensaje": "No se encontraron bloqueos registrados en el rango indicado.",
+            }
+        for b in bloqueos:
+            await db.delete(b)
+        await db.commit()
+        return {
+            "success": True,
+            "code": "SLOT_UNBLOCKED",
+            "bloqueos_eliminados": len(bloqueos),
+            "mensaje": f"Se eliminaron {len(bloqueos)} bloqueo(s) de agenda. El horario vuelve a estar disponible.",
+        }
+
+    if accion != "BLOQUEAR":
+        raise AppError(f"Acción de bloqueo inválida: {accion}", code="INVALID_ACTION")
 
     # Verificar si existen citas afectadas
     stmt_citas = (
@@ -567,18 +686,32 @@ async def agendar_o_mover_cita_manual_medico(
     mover una existente ('MOVER') o cancelarla ('CANCELAR'), resolviendo citas
     por UUID o nombre del paciente y previniendo colisiones en su agenda.
     """
-    stmt_prof = select(PerfilProfesional).where(PerfilProfesional.usuario_id == profesional_usuario_id)
+    stmt_prof = (
+        select(PerfilProfesional)
+        .options(selectinload(PerfilProfesional.usuario))
+        .where(PerfilProfesional.usuario_id == profesional_usuario_id)
+    )
     res_prof = await db.execute(stmt_prof)
     perfil = res_prof.scalars().first()
     if not perfil:
         raise EntityNotFoundError("Perfil profesional")
 
+    nombre_medico = (perfil.usuario.nombre_completo if perfil.usuario else None) or "tu médico"
+
     if accion == "CANCELAR":
         cita = await resolver_cita_medico(db, perfil.id, cita_id, nombre_paciente)
+        fecha_ant = cita.fecha_hora_inicio.strftime("%Y-%m-%d")
+        hora_ant = cita.fecha_hora_inicio.strftime("%H:%M")
+        paciente_user = cita.paciente
         cita.estado = "CANCELADA"
         cita.estado_financiero = "EXONERADO"
         await db.commit()
         await db.refresh(cita)
+
+        await _notificar_usuario_directo(
+            paciente_user,
+            f"❌ {nombre_medico} ha cancelado tu cita del {fecha_ant} a las {hora_ant}.",
+        )
         return cita
 
     if not (fecha_destino and hora_destino):
@@ -591,6 +724,7 @@ async def agendar_o_mover_cita_manual_medico(
         cita = await resolver_cita_medico(db, perfil.id, cita_id, nombre_paciente)
         await _check_manual_slot_collision(db, perfil.id, slot_start, slot_end, exclude_cita_id=cita.id)
 
+        paciente_user = cita.paciente
         cita.fecha_hora_inicio = slot_start
         cita.fecha_hora_fin = slot_end
         if motivo_consulta:
@@ -604,6 +738,11 @@ async def agendar_o_mover_cita_manual_medico(
         except IntegrityError:
             await db.rollback()
             raise SlotTakenError("El horario seleccionado ya está ocupado por otro paciente en su agenda.")
+
+        await _notificar_usuario_directo(
+            paciente_user,
+            f"🔄 {nombre_medico} ha reprogramado tu cita para el {fecha_destino.isoformat()} a las {hora_destino.strftime('%H:%M')}.",
+        )
         return cita
 
     elif accion == "CREAR":

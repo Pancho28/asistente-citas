@@ -118,7 +118,6 @@ async def _generate_content_resilient(
                     f"[AI TELEMETRY] Respuesta generada por model='{model_name}' "
                     f"| round='{round_label}' | latency={latency_ms}ms | failover={failover_used}"
                 )
-                print(msg)
                 logger.info(msg)
                 return result
             except Exception as exc:

@@ -412,3 +412,116 @@ async def test_mcp_patient_cancel_without_uuid(async_session: AsyncSession):
         current_db_session.reset(t_db)
         current_redis_client.reset(t_redis)
 
+
+@pytest.mark.asyncio
+async def test_doctor_mcp_unblock_and_close_days(async_session: AsyncSession):
+    from datetime import time
+    from decimal import Decimal
+    from sqlalchemy import select
+    from src.models.user import Usuario, PerfilProfesional
+    from src.models.schedule import HorarioBase
+    from src.agent.mcp_tools.registry import current_user_ctx, current_db_session
+    from src.agent.mcp_tools.doctor import (
+        bloquear_horario_agenda,
+        configurar_horario_base_y_perfil,
+    )
+
+    doc = Usuario(
+        canal_origen="TELEGRAM",
+        external_chat_id="doc_mcp_stage8",
+        nombre_completo="Dr. Foreman Stage 8",
+        rol_sistema="MEDICO",
+        modo_vista_actual="MEDICO",
+        activo=True,
+    )
+    async_session.add(doc)
+    await async_session.commit()
+    await async_session.refresh(doc)
+
+    perfil = PerfilProfesional(
+        id=uuid.uuid4(),
+        usuario_id=doc.id,
+        especialidad="Neurología",
+        duracion_cita_minutos=30,
+        tarifa_base_consulta=Decimal("70.00"),
+    )
+    async_session.add(perfil)
+    await async_session.commit()
+
+    ctx_doc = create_user_context(RoleEnum.MEDICO)
+    ctx_doc = UserContext(
+        user_id=doc.id,
+        external_chat_id=doc.external_chat_id,
+        channel=ChannelOrigin.TELEGRAM,
+        role=RoleEnum.MEDICO,
+        permissions=ctx_doc.permissions,
+    )
+    t_user = current_user_ctx.set(ctx_doc)
+    t_db = current_db_session.set(async_session)
+    try:
+        # 1. Configurar Lunes y Sábado, luego cerrar Sábado via MCP
+        res_cfg = await configurar_horario_base_y_perfil(
+            dias_semana=[1, 6],
+            hora_apertura="08:00",
+            hora_cierre="12:00",
+        )
+        assert res_cfg["success"] is True
+
+        res_close = await configurar_horario_base_y_perfil(dias_cerrados=[6])
+        assert res_close["success"] is True
+
+        activos = (
+            await async_session.execute(
+                select(HorarioBase).where(
+                    HorarioBase.profesional_id == perfil.id,
+                    HorarioBase.activo.is_(True),
+                )
+            )
+        ).scalars().all()
+        assert [hb.dia_semana for hb in activos] == [1]
+
+        # 2. Bloquear y luego desbloquear via MCP
+        res_blk = await bloquear_horario_agenda(
+            fecha_inicio="2026-11-30",
+            hora_inicio="08:00",
+            fecha_fin="2026-11-30",
+            hora_fin="10:00",
+            motivo="Cita personal",
+        )
+        assert res_blk["success"] is True
+
+        res_unblk = await bloquear_horario_agenda(
+            fecha_inicio="2026-11-30",
+            hora_inicio="08:00",
+            fecha_fin="2026-11-30",
+            hora_fin="10:00",
+            accion="DESBLOQUEAR",
+        )
+        assert res_unblk["success"] is True
+        assert res_unblk["code"] == "SLOT_UNBLOCKED"
+        assert res_unblk["bloqueos_eliminados"] == 1
+
+        # 3. Jornada partida via MCP (08:00-12:00 y 14:00-18:00)
+        res_split = await configurar_horario_base_y_perfil(
+            dias_semana=[2],
+            hora_apertura="08:00",
+            hora_cierre="12:00",
+            hora_apertura_2="14:00",
+            hora_cierre_2="18:00",
+        )
+        assert res_split["success"] is True
+
+        activos_martes = (
+            await async_session.execute(
+                select(HorarioBase).where(
+                    HorarioBase.profesional_id == perfil.id,
+                    HorarioBase.dia_semana == 2,
+                    HorarioBase.activo.is_(True),
+                )
+            )
+        ).scalars().all()
+        assert len(activos_martes) == 2
+    finally:
+        current_user_ctx.reset(t_user)
+        current_db_session.reset(t_db)
+

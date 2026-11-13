@@ -3,7 +3,7 @@
 > **Convención de Lectura Rápida (De lo más nuevo arriba a lo más antiguo abajo):**  
 > Este documento está ordenado en **orden cronológico inverso**. Las tareas pendientes (`[ ]`) de la iteración actual están siempre al inicio del archivo para que el agente ejecutor solo necesite leer las primeras líneas hasta encontrar el primer bloque ya completado (`[x]`).
 >
-> **Estado Actual:** 🟢 **Etapas 1 a 7 Completadas al 100% (59/59 Tests en Verde) | Listo para Despliegue en Producción ([`paso_prod.md`](./paso_prod.md))**
+> **Estado Actual:** 🟢 **Etapas 1 a 9 Completadas al 100% (65/65 Tests en Verde — Backlog Funcional Cerrado) | Listo para CI/CD y Despliegue en Producción ([`paso_prod.md`](./paso_prod.md))**
 
 ---
 
@@ -14,16 +14,18 @@
 
 ---
 
-## 🔮 Backlog Post-MVP (Mejoras para Futuras Versiones — Fase 2)
-- [ ] **1. Desbloquear un horario (`eliminar_bloqueo_agenda`):** Permitir al médico listar y eliminar/revertir un `BloqueoAgenda` previamente registrado (ej. si se cancela una junta médica o congreso y desea reabrir su agenda).
-- [ ] **2. Jornada partida en un mismo día (Horario de almuerzo fijo):** Soportar múltiples tramos horarios para un mismo día en `configurar_horario_base_y_perfil` (ej. de `08:00` a `12:00` y de `14:00` a `18:00`) sin necesidad de usar bloqueos manuales.
-- [ ] **3. Notificaciones proactivas cruzadas en tiempo real (Médico $\leftrightarrow$ Paciente):** Disparar aviso automático por Telegram/WhatsApp al paciente cuando el médico mueva o cancele manualmente su cita, y al médico cuando el paciente agende, reagende o cancele.
-- [ ] **4. Desambiguación de homónimos o múltiples citas futuras:** Cuando `resolver_cita_medico` encuentre más de una cita activa que coincida con el nombre del paciente (dos pacientes con el mismo nombre o un mismo paciente con varias citas futuras), devolver la lista de coincidencias para que el médico confirme cuál desea modificar/cobrar.
-- [ ] **5. Cerrar/Desactivar días de la semana (`cerrar_dias`):** Añadir soporte en `configurar_horario_base_y_perfil` para desactivar por completo un día de la semana que antes estaba habilitado (ej. dejar de atender los sábados).
-
----
-
 ## ✅ Historial Completado (De lo más reciente a lo más antiguo — Ya Verificado)
+
+### 🔔 Etapa 9: Jornada Partida, Desambiguación de Citas y Notificaciones Cruzadas (Completada)
+- [x] **1. Jornada partida en un mismo día (`hora_apertura_2` y `hora_cierre_2`):** Añadido segundo tramo horario diario en `configurar_horario_base_y_perfil` ([`src/services/onboarding_service.py`](src/services/onboarding_service.py) y [`src/agent/mcp_tools/doctor.py`](src/agent/mcp_tools/doctor.py)) y actualizado `_formatear_horario_semanal` en [`src/services/appointment_service.py`](src/services/appointment_service.py) para múltiples tramos.
+- [x] **2. Desambiguación de homónimos o múltiples citas futuras:** Actualizado `resolver_cita_medico` ([`src/services/appointment_service.py`](src/services/appointment_service.py)) para lanzar `ValidationError` listando cada coincidencia y su `cita_id` cuando haya más de una cita activa en conflicto.
+- [x] **3. Notificaciones proactivas cruzadas en tiempo real (Médico $\leftrightarrow$ Paciente):** Implementado `_notificar_usuario_directo` (*best-effort*) en [`src/services/appointment_service.py`](src/services/appointment_service.py) para avisar al médico cuando el paciente agende/cancele/reagende y al paciente cuando el médico mueva o cancele su cita manualmente.
+- [x] **[TDD VERIFICADO]** Añadidos `test_doctor_split_shift_schedule_generation`, `test_doctor_disambiguation_on_homonym_patients`, `test_realtime_cross_notifications_between_doctor_and_patient` y cobertura MCP (**65/65 tests en verde**).
+
+### 🗓️ Etapa 8: Desbloqueo de Agenda y Cierre de Días Laborales (Completada)
+- [x] **1. Desbloquear un horario (`accion="DESBLOQUEAR"`):** Añadido soporte en `bloquear_horario_agenda` ([`src/services/appointment_service.py`](src/services/appointment_service.py) y [`src/agent/mcp_tools/doctor.py`](src/agent/mcp_tools/doctor.py)) para eliminar bloqueos que se solapen en un rango (`SLOT_UNBLOCKED` / `NO_BLOCKS_FOUND`) y reabrir la agenda.
+- [x] **2. Cerrar/Desactivar días de la semana (`dias_cerrados`):** Añadido `dias_cerrados: list[int] | None = None` en `configurar_horario_base_y_perfil` ([`src/services/onboarding_service.py`](src/services/onboarding_service.py) y [`src/agent/mcp_tools/doctor.py`](src/agent/mcp_tools/doctor.py)) para desactivar días completos sin exigir horas de apertura/cierre.
+- [x] **[TDD VERIFICADO]** Añadidos 3 nuevos tests en [`tests/test_stage2b_availability_and_appointments.py`](tests/test_stage2b_availability_and_appointments.py), [`tests/test_stage2b_finance_and_onboarding.py`](tests/test_stage2b_finance_and_onboarding.py) y [`tests/test_stage3_mcp_security_and_tools.py`](tests/test_stage3_mcp_security_and_tools.py) (**62/62 tests en verde**).
 
 ### 🩺 Etapa 7: Las 8 Mejoras Operativas del Día a Día (Médico y Paciente — Completada)
 - [x] **1. Cancelación manual por el médico (`accion="CANCELAR"`):** Soportado `"CANCELAR"` en `agendar_o_mover_cita_manual_medico` ([`src/services/appointment_service.py`](src/services/appointment_service.py)) y `agendar_o_mover_cita_manual` ([`src/agent/mcp_tools/doctor.py`](src/agent/mcp_tools/doctor.py)).
