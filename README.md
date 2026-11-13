@@ -70,7 +70,8 @@ WHATSAPP_VERIFY_TOKEN=tu_verify_token_para_hub_challenge
 
 # Google Gemini API (SDK google-genai)
 GEMINI_API_KEY=tu_api_key_de_google_ai_studio
-GEMINI_MODEL=gemini-2.5-flash
+IA_MODELS=["gemini-3.5-flash", "gemini-3.7-flash", "gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+GEMINI_HEDGED_TIMEOUT_SECONDS=4.0
 
 # Canales de Mensajería (Adaptadores de salida)
 TELEGRAM_BOT_TOKEN=123456789:ABCDEF_tu_token_de_botfather

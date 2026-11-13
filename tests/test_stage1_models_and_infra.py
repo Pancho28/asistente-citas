@@ -331,3 +331,33 @@ def test_railway_database_url_normalization():
     assert s3.DATABASE_URL == "postgresql+asyncpg://postgres:password@localhost:5432/citas_medicas"
 
 
+def test_ia_models_single_array_configuration():
+    from src.core.config import Settings
+
+    s_default = Settings(_env_file=None)
+    assert s_default.IA_MODELS == [
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-4-hydrogen",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+    ]
+    assert s_default.gemini_models_list[2] == "gemini-4-hydrogen"
+
+    s_json = Settings(
+        _env_file=None,
+        IA_MODELS='["gemini-3.5-flash", "gemini-4-hydrogen", "gemini-3.5-flash"]',
+    )
+    assert s_json.gemini_models_list == ["gemini-3.5-flash", "gemini-4-hydrogen"]
+
+    s_csv = Settings(
+        _env_file=None,
+        IA_MODELS="gemini-3.5-flash, gemini-3.7-flash, gemini-4-hydrogen",
+    )
+    assert s_csv.gemini_models_list == [
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-4-hydrogen",
+    ]
+
+

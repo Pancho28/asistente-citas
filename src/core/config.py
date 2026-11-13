@@ -22,10 +22,10 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = "tu_verify_token_para_hub_challenge"
 
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_FALLBACK_MODELS: list[str] = [
+    IA_MODELS: list[str] = [
         "gemini-3.5-flash",
         "gemini-3.7-flash",
+        "gemini-4-hydrogen",
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
     ]
@@ -55,9 +55,9 @@ class Settings(BaseSettings):
                 return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
 
-    @field_validator("GEMINI_FALLBACK_MODELS", mode="before")
+    @field_validator("IA_MODELS", mode="before")
     @classmethod
-    def parse_gemini_fallback_models(cls, v: Any) -> list[str]:
+    def parse_ia_models(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             v = v.strip()
             if v.startswith("[") and v.endswith("]"):
@@ -75,11 +75,7 @@ class Settings(BaseSettings):
 
     @property
     def gemini_models_list(self) -> list[str]:
-        models = [self.GEMINI_MODEL]
-        for m in self.GEMINI_FALLBACK_MODELS:
-            if m not in models:
-                models.append(m)
-        return models
+        return list(dict.fromkeys(self.IA_MODELS))
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -51,8 +51,7 @@ Genera una cadena aleatoria segura (de 32 a 64 caracteres alfanuméricos, por ej
 3. **Configuración de Resiliencia Multi-Modelo:**
    Mantén en tus variables de entorno la cadena de modelos Flash para que el sistema conmute en `<300ms` (Fast Failover) o a los `4.0s` (Hedged Request) si un modelo presenta picos de demanda (`503`):
    ```env
-   GEMINI_MODEL=gemini-3.5-flash
-   GEMINI_FALLBACK_MODELS=["gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+   IA_MODELS=["gemini-3.5-flash", "gemini-3.7-flash", "gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
    GEMINI_HEDGED_TIMEOUT_SECONDS=4.0
    ```
 4. **Recomendación importante para Tráfico Real (Cuotas):**
@@ -103,8 +102,7 @@ WHATSAPP_VERIFY_TOKEN=tu_verify_token_para_hub_challenge
 
 # 5. Google Gemini Flash + Cadena de Resiliencia
 GEMINI_API_KEY=tu_api_key_real_de_google_ai_studio
-GEMINI_MODEL=gemini-3.5-flash
-GEMINI_FALLBACK_MODELS=["gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+IA_MODELS=["gemini-3.5-flash", "gemini-3.7-flash", "gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
 GEMINI_HEDGED_TIMEOUT_SECONDS=4.0
 
 # 6. Credenciales Reales de Telegram
