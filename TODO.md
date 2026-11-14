@@ -3,18 +3,22 @@
 > **Convención de Lectura Rápida (De lo más nuevo arriba a lo más antiguo abajo):**  
 > Este documento está ordenado en **orden cronológico inverso**. Las tareas pendientes (`[ ]`) de la iteración actual están siempre al inicio del archivo para que el agente ejecutor solo necesite leer las primeras líneas hasta encontrar el primer bloque ya completado (`[x]`).
 >
-> **Estado Actual:** 🟢 **Etapas 1 a 9 Completadas al 100% (65/65 Tests en Verde — Backlog Funcional Cerrado) | Listo para CI/CD y Despliegue en Producción ([`paso_prod.md`](./paso_prod.md))**
+> **Estado Actual:** 🟢 **En Producción en Railway (Bot Web + Worker ARQ + Postgres + Redis Activos | 67/67 Tests en Verde) | Pendiente: Mejora Onboarding Médico & CI/CD**
 
 ---
 
-## 🌐 Tareas Cross-Repo, CI/CD y Despliegue (GitHub, API Gateway & Railway — Pendientes)
+## 📋 Tareas Pendientes (Iteración Actual & Infraestructura)
+- [ ] **Mejorar Onboarding Guiado del Médico (Etapa 10):** Detectar automáticamente cuando un médico entra por primera vez (tras canjear su código `MED-...` o en su primer turno como `MEDICO`) si le faltan datos de configuración —como **horario de consulta**, **duración de citas**, **tarifa/cobro base** u **hora de resumen diario**— y preguntárselos de forma proactiva y guiada hasta completar su perfil.
 - [ ] **CI/CD en GitHub Actions:** Crear workflow en `.github/workflows/ci.yml` que ejecute `pytest` automáticamente en cada `push` y `pull_request` hacia `main` antes de desplegar en Railway.
-- [ ] Programar en el repositorio del **API Gateway** el endpoint `POST /webhooks/{provider}/{app_id}` según el contrato de `SPEC.md` y [`paso_prod.md`](./paso_prod.md).
-- [ ] Aprovisionar en **Railway** PostgreSQL, Redis, el servicio Web (`asistente-citas-api`), el Worker (`asistente-citas-worker`) y registrar el webhook en Telegram siguiendo [`paso_prod.md`](./paso_prod.md).
+- [ ] *(Opcional Cross-Repo)* Programar en el repositorio del **API Gateway** el endpoint genérico `POST /webhooks/{provider}/{app_id}` según `SPEC.md` (actualmente ya funciona en producción mediante el prefijo `/asistente-citas/api/v1/webhook`).
 
 ---
 
 ## ✅ Historial Completado (De lo más reciente a lo más antiguo — Ya Verificado)
+
+### 🚀 Despliegue en Producción en Railway y Ajustes Finales (Completado)
+- [x] Aprovisionado en **Railway** PostgreSQL, Redis, el servicio Web (`asistente-citas` con `Dockerfile`, `entrypoint.sh` y `railway.toml`), el Worker (`asistente-citas-worker` con `railway.worker.toml`) y registrado el webhook en Telegram a través de `api-gateway-auth` siguiendo [`paso_prod.md`](./paso_prod.md).
+- [x] Unificada la cadena de modelos en `IA_MODELS` (con `gemini-4-hydrogen` como 3.ª opción multi-familia), configurados logs limpios propios (`src.*`) en [`src/main.py`](src/main.py) y fijada `timezone = ZoneInfo(settings.DEFAULT_TIMEZONE)` en [`WorkerSettings`](src/workers/tasks.py) (**67/67 tests en verde**).
 
 ### 🔔 Etapa 9: Jornada Partida, Desambiguación de Citas y Notificaciones Cruzadas (Completada)
 - [x] **1. Jornada partida en un mismo día (`hora_apertura_2` y `hora_cierre_2`):** Añadido segundo tramo horario diario en `configurar_horario_base_y_perfil` ([`src/services/onboarding_service.py`](src/services/onboarding_service.py) y [`src/agent/mcp_tools/doctor.py`](src/agent/mcp_tools/doctor.py)) y actualizado `_formatear_horario_semanal` en [`src/services/appointment_service.py`](src/services/appointment_service.py) para múltiples tramos.
