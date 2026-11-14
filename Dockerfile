@@ -5,14 +5,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md alembic.ini ./
+COPY pyproject.toml README.md alembic.ini entrypoint.sh ./
 COPY src ./src
 COPY migrations ./migrations
 
-RUN pip install --no-cache-dir --upgrade pip \
+RUN sed -i 's/\r$//' /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh \
+    && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
 EXPOSE 8005
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn src.main:app --host :: --port ${PORT:-8005}"]
+CMD ["/app/entrypoint.sh"]
 

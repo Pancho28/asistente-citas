@@ -73,9 +73,9 @@ Debes crear los recursos **dentro del mismo Proyecto de Railway** donde corre tu
 2. En la pestaña **Settings** del servicio:
    - **Service Name:** `asistente-citas` (su dominio interno será `asistente-citas.railway.internal`).
    - **Networking (Private Networking):** Asegúrate de que esté habilitado. Si expones el webhook a través de `api-gateway-auth`, **no necesitas** generar un dominio público en `asistente-citas`; si deseas probarlo directo sin Gateway primero, puedes hacer clic en *Generate Domain*.
-   - **Custom Start Command:** Configura el siguiente comando para que aplique las migraciones de Alembic al iniciar y escuche en IPv6/IPv4 (`--host ::`):
+   - **Start Command / Config-as-Code (`railway.toml`):** El repositorio ya incluye [`railway.toml`](railway.toml) y [`entrypoint.sh`](entrypoint.sh), por lo que ejecutará automáticamente las migraciones de Alembic y levantará Uvicorn en `0.0.0.0:${PORT:-8005}` (`CMD ["/app/entrypoint.sh"]`). Si configuraste manualmente un *Custom Start Command* distinto en el panel, déjalo vacío o apunta al archivo `railway.toml`:
      ```bash
-     alembic upgrade head && uvicorn src.main:app --host :: --port $PORT
+     /app/entrypoint.sh
      ```
    - **Healthcheck Path:** `/api/v1/health`
 
@@ -124,6 +124,7 @@ Para que se ejecuten el **Cron diario de las 12:00 PM** (recordatorios a pacient
 1. En el mismo proyecto de Railway, haz clic en **`+ New`** ➔ **`GitHub Repo`** y vuelve a elegir `asistente-citas`.
 2. En **Settings**:
    - **Service Name:** `asistente-citas-worker`
+   - **Config File Path (Config-as-Code):** `/railway.worker.toml` (para que no herede el `startCommand` de la API en `railway.toml`)
    - **Custom Start Command:**
      ```bash
      arq src.workers.tasks.WorkerSettings
