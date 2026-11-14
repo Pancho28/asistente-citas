@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, date, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import select, cast, Date, func
@@ -214,5 +215,6 @@ class WorkerSettings:
         cron(enviar_recordatorios_diarios_pacientes, hour=12, minute=0),
         cron(heartbeat_horario_medicos_y_cierre_citas, minute=0),
     ]
+    timezone = ZoneInfo(settings.DEFAULT_TIMEZONE)
     redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
 

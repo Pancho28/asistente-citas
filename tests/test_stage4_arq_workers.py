@@ -191,3 +191,11 @@ async def test_hourly_heartbeat_auto_completes_past_appointments_and_sends_docto
         res_segunda = await heartbeat_horario_medicos_y_cierre_citas(ctx)
         assert res_segunda["resumenes_enviados"] == 0
 
+
+def test_worker_settings_uses_configured_timezone():
+    from zoneinfo import ZoneInfo
+    from src.workers.tasks import WorkerSettings
+
+    assert WorkerSettings.timezone == ZoneInfo(settings.DEFAULT_TIMEZONE)
+
+
