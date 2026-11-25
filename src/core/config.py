@@ -2,7 +2,7 @@ from functools import lru_cache
 from zoneinfo import ZoneInfo
 from datetime import datetime
 from typing import Any
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,8 +11,14 @@ class Settings(BaseSettings):
     DEFAULT_TIMEZONE: str = "America/Caracas"
     PORT: int = 8005
 
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@127.0.0.1:5433/citas_medicas"
-    REDIS_URL: str = "redis://127.0.0.1:6380/0"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://reservas_user:reservas_super_secret_password_2026"
+        "@127.0.0.1:5433/citas_medicas"
+    )
+    DB_POOL_SIZE: int = Field(default=5, ge=1)
+    DB_MAX_OVERFLOW: int = Field(default=5, ge=0)
+    DB_POOL_TIMEOUT: int = Field(default=15, ge=1)
+    REDIS_URL: str = "redis://:redis_secure_password_2026@127.0.0.1:6380/1"
 
     INTERNAL_GATEWAY_SECRET: str = "clave_secreta_compartida_con_el_gateway"
 

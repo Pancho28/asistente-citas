@@ -184,7 +184,7 @@ erDiagram
 
 ## 5. Estructuras en Redis y Tareas Programadas (`arq`)
 
-Redis cumple tres funciones dentro de la misma instancia:
+Redis cumple tres funciones dentro de la misma instancia (usando el índice lógico asignado `/1` dentro del **Par 2 Compartido** con contraseña unificada; y en PostgreSQL mediante `DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=5`, `DB_POOL_TIMEOUT=15` en `src/core/config.py` y `src/core/database.py` para compartir conexiones entre API Web, Worker ARQ y los demás microservicios):
 
 ### 5.1 Claves de Memoria y Concurrencia
 | Patrón de Clave | Tipo | TTL | Propósito |

@@ -8,9 +8,23 @@
 ---
 
 ## 📋 Tareas Pendientes (Iteración Actual & Infraestructura)
+- [ ] **Notificaciones sin pacientes (eliminar `Total de pacientes: 0`):** Cuando no existan citas para la jornada, responder únicamente `"No tienes citas programadas para esta jornada"` y omitir el contador `Total de pacientes: 0` (mostrar el total únicamente cuando haya al menos 1 paciente).
+- [ ] **Auditar huso horario en notificaciones y cron (`America/Caracas` vs UTC):** Aunque `DEFAULT_TIMEZONE="America/Caracas"` está seteado en [`src/core/config.py`](src/core/config.py) y `WorkerSettings.timezone` en [`src/workers/tasks.py`](src/workers/tasks.py), verificar por qué las notificaciones llegan a otra hora (revisar comparación de `hora_resumen_diario`, conversión `fecha_hora_inicio` UTC vs `ZoneInfo(DEFAULT_TIMEZONE)` y variable `DEFAULT_TIMEZONE` / `TZ` en Railway).
+- [ ] **Filtrar días fuera de horario en Resumen Semanal:** Evitar que aparezcan días sin jornada laboral (ej. sábados y domingos cuando el médico atiende solo de lunes a viernes); mostrar únicamente los días habilitados en su horario en los que puede tener pacientes.
+- [ ] **Despliegue Par 2 en Railway (Web + Worker ARQ):** Subir los cambios de `DB_POOL_SIZE=5` / `DB_MAX_OVERFLOW=5` / `DB_POOL_TIMEOUT=15` y verificar en Railway que `DATABASE_URL` apunte a la BD lógica `citas_medicas` y `REDIS_URL` termine en `/1` en ambos servicios.
+- [x] **Alineación Par 2 Compartido (`saas/PLAN.md` B.2, B.3 y Cutover Docker Raíz — Completado el 2026-11-25):**
+  - [x] **B.2 — Pools de PostgreSQL:** Acotados `DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=5`, `DB_POOL_TIMEOUT=15` en [`src/core/config.py`](src/core/config.py) y `build_engine_options` en [`src/core/database.py`](src/core/database.py) (cubierto en [`tests/test_database_and_redis_pair2_config.py`](tests/test_database_and_redis_pair2_config.py)).
+  - [x] **B.3 — Índice Redis `/1` y credenciales unificadas:** Actualizado default `REDIS_URL` en [`src/core/config.py`](src/core/config.py) a `redis://:redis_secure_password_2026@127.0.0.1:6380/1` junto con [`.env.example`](.env.example), `.env` y [`README.md`](README.md).
+  - [x] **Fase 4 — Cutover Docker Raíz + Alembic:** Levantado [`saas/docker-compose.yml`](../docker-compose.yml) (`saas_shared_postgres` `:5433` + `saas_shared_redis` `:6380`), aplicadas migraciones hasta `0002_seed_initial_admin (head)` contra `citas_medicas`, verificada conectividad en vivo (`usuarios: 2`, Redis `/1 -> True`), retirado `asistente-citas/docker-compose.yml` y actualizado [`README.md`](README.md) hacia `../docker-compose.yml`.
 - [ ] **Mejorar Onboarding Guiado del Médico (Etapa 10):** Detectar automáticamente cuando un médico entra por primera vez (tras canjear su código `MED-...` o en su primer turno como `MEDICO`) si le faltan datos de configuración —como **horario de consulta**, **duración de citas**, **tarifa/cobro base** u **hora de resumen diario**— y preguntárselos de forma proactiva y guiada hasta completar su perfil.
 - [ ] **CI/CD en GitHub Actions:** Crear workflow en `.github/workflows/ci.yml` que ejecute `pytest` automáticamente en cada `push` y `pull_request` hacia `main` antes de desplegar en Railway.
 - [ ] *(Opcional Cross-Repo)* Programar en el repositorio del **API Gateway** el endpoint genérico `POST /webhooks/{provider}/{app_id}` según `SPEC.md` (actualmente ya funciona en producción mediante el prefijo `/asistente-citas/api/v1/webhook`).
+
+---
+
+## 💡 Mejoras a Futuro / Roadmap *(Por diseñar en `[PLAN]`)*
+- [ ] **Perfil Coordinador / Administrador de Médicos (Agenda Multi-Médico)** *(Agregado: 2026-11-19)*: Nuevo rol intermedio de negocio (distinto del `ADMIN` técnico del bot) que permita a un usuario llevar la agenda, bloqueos, citas y pagos de **varios médicos asignados** (requerirá tabla de vínculo gestor-profesional y selección del médico activo en contexto antes de ejecutar tools MCP).
+- [ ] **Integración con Google Calendar (Sincronización de Citas)** *(Agregado: 2026-11-19)*: Vincular la cuenta de Google Calendar de cada médico (OAuth 2.0 + refresh token cifrado) para crear, reagendar y cancelar eventos automáticamente en su calendario cuando cambie una cita (y opcionalmente consultar eventos externos como bloqueos al calcular disponibilidad).
 
 ---
 

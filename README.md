@@ -36,7 +36,7 @@ Este repositorio sigue una estructura estricta de **SDD + TDD**. Antes de modifi
 * **[`SPEC.md`](./SPEC.md):** Fuente de la verdad funcional, modelo Entidad-Relación (Mermaid), contrato de cabeceras del API Gateway, estructura de claves en Redis y formato de botones rápidos.
 * **[`PLAN.md`](./PLAN.md):** Plan Maestro de Implementación dividido en 4 etapas incrementales (firmas exactas, contrato de red con el API Gateway, casos borde y diseño de tests TDD).
 * **[`TODO.md`](./TODO.md):** Tablero de control de progreso vivo (checklist *Red ➔ Green ➔ Refactor* por etapa).
-* **[`AGENTS.md`](./AGENT.md):** Reglas para asistentes de código (Flujo de Fase 1 Planificación con Opus/Argon vs. Fase 2 TDD con Flash/Sonnet, restricciones de librerías y uso obligatorio de la carpeta `debug/`).
+* **[`AGENTS.md`](./AGENTS.md):** Reglas para asistentes de código (Flujo de Fase 1 Planificación con Opus/Argon vs. Fase 2 TDD con Flash/Sonnet, restricciones de librerías y uso obligatorio de la carpeta `debug/`).
 * **[`skills/`](./skills/):** Especificación de las herramientas MCP divididas por rol:
   * [`skills/SKILLS.md`](./skills/SKILLS.md) — Reglas globales de seguridad (Doble Barrera e inyección de identidad).
   * [`skills/paciente_skills.md`](./skills/paciente_skills.md) — Herramientas del rol `PACIENTE`.
@@ -56,9 +56,13 @@ DEFAULT_TIMEZONE=America/Caracas
 # En local usa 8005 para no colisionar con el puerto 8000 del API Gateway Go
 PORT=8005
 
-# Base de Datos y Redis (En local usa 5433 y 6380 para no colisionar con los contenedores del API Gateway; en producción usa *.railway.internal)
-DATABASE_URL=postgresql+asyncpg://postgres:password@127.0.0.1:5433/citas_medicas
-REDIS_URL=redis://127.0.0.1:6380/0
+# Base de Datos y Redis (Par 2 Compartido desde la raíz saas/docker-compose.yml en puertos 5433/6380; en producción vía *.railway.internal)
+# Índice Redis asignado en el Par 2 compartido: /1 (0..15)
+DATABASE_URL=postgresql+asyncpg://reservas_user:reservas_super_secret_password_2026@127.0.0.1:5433/citas_medicas
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=5
+DB_POOL_TIMEOUT=15
+REDIS_URL=redis://:redis_secure_password_2026@127.0.0.1:6380/1
 
 # Seguridad Interna con el API Gateway (X-Internal-Api-Key inyectada por api-gateway-auth)
 INTERNAL_GATEWAY_SECRET=clave_secreta_compartida_con_el_gateway
@@ -90,10 +94,10 @@ source .venv/bin/activate  # En Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-### 4.2 Levantar PostgreSQL (5433) y Redis (6380) en local (Docker Compose)
-Para el desarrollo local se utilizan contenedores oficiales de PostgreSQL 16 (`5433:5432`) y Redis 7 (`6380:6379`) con puertos aislados para que puedan correr en paralelo con `api-gateway-auth` (`5432`, `6379`, `8000`) sin colisiones:
+### 4.2 Levantar PostgreSQL (5433) y Redis (6380) centralizados (`saas/docker-compose.yml`)
+Para el desarrollo local se utilizan los contenedores compartidos del **Par 2** definidos en `saas/docker-compose.yml` (PostgreSQL 16 en `5433:5432` con la BD lógica `citas_medicas` y Redis 7 en `6380:6379` usando el índice `/1`), con puertos aislados frente a `api-gateway-auth` (`5432`, `6379`, `8000`):
 ```bash
-docker compose up -d
+docker compose -f ../docker-compose.yml up -d
 ```
 
 ### 4.3 Aplicar migraciones en PostgreSQL (Alembic)
@@ -166,16 +170,16 @@ curl -X POST http://localhost:8000/api/v1/webhook \
 
 Para minimizar costos de ancho de banda (*Egress*) y garantizar aislamiento de red, este servicio se despliega **dentro del mismo proyecto de Railway donde viven el API Gateway, PostgreSQL y Redis**:
 
-1. **Sin Dominio Público:** No generes un dominio público para este microservicio en Railway. Solo el **API Gateway** está expuesto a internet (`POST /webhooks/{provider}/{app_id}`).
+1. **Sin Dominio Público:** No generes un dominio público para este microservicio en Railway. Solo el **API Gateway** está expuesto a internet (`POST /asistente-citas/api/v1/webhook`).
 2. **Enrutamiento Interno desde el Gateway:** Configura el Gateway para hacer proxy hacia la dirección interna de Railway:
    ```text
-   [http://asistente-citas.railway.internal:8000/api/v1/webhook](http://asistente-citas.railway.internal:8000/api/v1/webhook)
+   http://asistente-citas.railway.internal:8005/api/v1/webhook
    ```
 3. **Binding IPv6 para Red Privada de Railway:** La red interna `*.railway.internal` resuelve sobre IPv6. El comando de inicio en producción para el contenedor web debe escuchar en `::`:
    ```bash
    uvicorn src.main:app --host :: --port $PORT
    ```
-4. **Servicios Nativos de Base de Datos y Redis (Sin Docker Compose en Producción):** En Railway se utilizan los servicios nativos administrados de **PostgreSQL** y **Redis** del proyecto. Conéctalos siempre mediante las variables internas `${{Postgres.DATABASE_PRIVATE_URL}}` y `${{Redis.REDIS_PRIVATE_URL}}` para evitar cargos por tráfico saliente (`src/core/config.py` normaliza automáticamente el prefijo `postgresql+asyncpg://`).
+4. **Par de Datos Compartido (Par 2 en Railway):** En producción se reutilizan las instancias compartidas de **PostgreSQL** (con la base de datos lógica `citas_medicas`) y **Redis** (índice lógico `/1` de `0..15`) del Proyecto Core, conectando siempre por red privada `*.railway.internal` (`src/core/config.py` normaliza automáticamente el prefijo `postgresql+asyncpg://`).
 
 ---
 
