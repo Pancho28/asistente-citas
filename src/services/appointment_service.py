@@ -22,7 +22,7 @@ from src.core.exceptions import (
     AppError,
 )
 from src.core.redis import acquire_slot_lock, release_slot_lock
-from src.core.config import now_tz
+from src.core.config import format_wall_time, now_tz, now_wall_utc
 from src.services.availability_service import _normalize_text
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,84 @@ DIAS_SEMANA_ORDENADOS: list[tuple[int, str]] = [
     (6, "Sábado"),
     (0, "Domingo"),
 ]
+
+NOMBRES_DIA_SPEC: dict[int, str] = dict(DIAS_SEMANA_ORDENADOS)
+
+
+def construir_resumen_dias_habilitados(
+    horarios_activos: list[HorarioBase],
+    fecha_inicio: date,
+    fecha_fin: date | None,
+    citas_agenda: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Filtra el rango [fecha_inicio, fecha_fin] conservando únicamente los días que pertenecen
+    al HorarioBase activo del médico (o donde excepcionalmente ya exista una cita agendada).
+    Si el médico no tiene ningún HorarioBase configurado aún, incluye los días del rango.
+    """
+    fin = fecha_fin if (fecha_fin and fecha_fin >= fecha_inicio) else fecha_inicio
+    por_dia_hb: dict[int, list[HorarioBase]] = {}
+    for hb in horarios_activos:
+        if hb.activo:
+            por_dia_hb.setdefault(hb.dia_semana, []).append(hb)
+
+    tiene_horario_configurado = len(por_dia_hb) > 0
+    dias_resultado: list[dict[str, Any]] = []
+    cursor = fecha_inicio
+
+    while cursor <= fin:
+        dia_spec = (cursor.weekday() + 1) % 7
+        fecha_iso = cursor.isoformat()
+        citas_del_dia = [c for c in citas_agenda if c.get("fecha") == fecha_iso]
+        bloques_dia = sorted(por_dia_hb.get(dia_spec, []), key=lambda b: b.hora_inicio)
+
+        if not tiene_horario_configurado or bloques_dia or citas_del_dia:
+            horario_str = (
+                " y ".join(
+                    f"{b.hora_inicio.strftime('%H:%M')}-{b.hora_fin.strftime('%H:%M')}"
+                    for b in bloques_dia
+                )
+                if bloques_dia
+                else "Fuera de horario habitual (con cita)"
+            )
+            dias_resultado.append({
+                "fecha": fecha_iso,
+                "dia_semana": NOMBRES_DIA_SPEC[dia_spec],
+                "horario_atencion": horario_str,
+                "total_citas": len(citas_del_dia),
+                "citas": citas_del_dia,
+            })
+        cursor += timedelta(days=1)
+
+    return dias_resultado
+
+
+async def obtener_resumen_horario_y_dias_medico(
+    db: AsyncSession,
+    profesional_usuario_id: UUID,
+    fecha_inicio: date,
+    fecha_fin: date | None,
+    citas_agenda: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Obtiene el texto del horario semanal configurado y los días habilitados en el rango."""
+    stmt_prof = (
+        select(PerfilProfesional)
+        .options(selectinload(PerfilProfesional.horarios_base))
+        .where(PerfilProfesional.usuario_id == profesional_usuario_id)
+    )
+    perfil = (await db.execute(stmt_prof)).scalars().first()
+    if not perfil:
+        raise EntityNotFoundError("Perfil profesional")
+
+    horarios_activos = [hb for hb in perfil.horarios_base if hb.activo]
+    horario_texto = _formatear_horario_semanal(horarios_activos)
+    dias_habilitados = construir_resumen_dias_habilitados(
+        horarios_activos=horarios_activos,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        citas_agenda=citas_agenda,
+    )
+    return horario_texto, dias_habilitados
 
 
 def _formatear_horario_semanal(horarios_activos: list[HorarioBase]) -> str:
@@ -167,7 +245,7 @@ async def resolver_cita_medico(
         if en_fecha:
             coincidencias = en_fecha
 
-    ventana_reciente = now_tz() - timedelta(hours=2)
+    ventana_reciente = now_wall_utc() - timedelta(hours=2)
     proximas = [
         c
         for c in coincidencias
@@ -189,7 +267,7 @@ async def resolver_cita_medico(
             return exactas[0]
 
         opciones = [
-            f"- {c.paciente.nombre_completo} el {c.fecha_hora_inicio.strftime('%Y-%m-%d a las %H:%M')} (cita_id: {c.id})"
+            f"- {c.paciente.nombre_completo} el {format_wall_time(c.fecha_hora_inicio, '%Y-%m-%d')} a las {format_wall_time(c.fecha_hora_inicio, '%H:%M')} (cita_id: {c.id})"
             for c in candidatas
         ]
         raise ValidationError(
@@ -376,7 +454,7 @@ async def listar_citas_activas_paciente(
         .where(
             Cita.paciente_id == paciente_id,
             Cita.estado.in_(["CONFIRMADA", "CONFIRMADA_PACIENTE"]),
-            Cita.fecha_hora_inicio >= now_tz(),
+            Cita.fecha_hora_inicio >= now_wall_utc(),
         )
         .order_by(Cita.fecha_hora_inicio.asc())
     )
@@ -420,7 +498,7 @@ async def cancelar_o_reagendar_cita_paciente(
             .where(
                 Cita.paciente_id == paciente_id,
                 Cita.estado.in_(["CONFIRMADA", "CONFIRMADA_PACIENTE"]),
-                Cita.fecha_hora_inicio >= now_tz(),
+                Cita.fecha_hora_inicio >= now_wall_utc(),
             )
             .order_by(Cita.fecha_hora_inicio.asc())
         )
@@ -446,17 +524,17 @@ async def cancelar_o_reagendar_cita_paciente(
     horas_anticipacion = cita.profesional.min_horas_anticipacion_cancelar
     inicio_tz = cita.fecha_hora_inicio
     if inicio_tz.tzinfo is None:
-        inicio_tz = inicio_tz.replace(tzinfo=now_tz().tzinfo)
+        inicio_tz = inicio_tz.replace(tzinfo=timezone.utc)
     limite_cancelacion = inicio_tz - timedelta(hours=horas_anticipacion)
 
-    if now_tz() > limite_cancelacion:
+    if now_wall_utc() > limite_cancelacion:
         raise CancellationWindowExpiredError()
 
     if accion == "CANCELAR":
         cita.estado = "CANCELADA"
         cita.estado_financiero = "EXONERADO"
         # Liberar lock en Redis si existiera
-        slot_str = cita.fecha_hora_inicio.strftime("%Y-%m-%d_%H:%M")
+        slot_str = format_wall_time(cita.fecha_hora_inicio, "%Y-%m-%d_%H:%M")
         await release_slot_lock(redis_client, cita.profesional_id, slot_str, paciente_id)
         await db.commit()
         await db.refresh(cita)
@@ -466,7 +544,7 @@ async def cancelar_o_reagendar_cita_paciente(
         await _notificar_usuario_directo(
             medico_user,
             f"❌ Cita cancelada por el paciente {nombre_pac} "
-            f"({cita.fecha_hora_inicio.strftime('%Y-%m-%d')} a las {cita.fecha_hora_inicio.strftime('%H:%M')}).",
+            f"({format_wall_time(cita.fecha_hora_inicio, '%Y-%m-%d')} a las {format_wall_time(cita.fecha_hora_inicio, '%H:%M')}).",
         )
         return cita
 
@@ -475,8 +553,8 @@ async def cancelar_o_reagendar_cita_paciente(
             raise AppError("Debe proporcionar nueva_fecha y nueva_hora para reagendar", code="INVALID_PARAMS")
 
         # Cancelar cita actual y liberar lock en Redis del horario anterior
-        slot_str_viejo = cita.fecha_hora_inicio.strftime("%Y-%m-%d_%H:%M")
-        fecha_vieja_fmt = cita.fecha_hora_inicio.strftime("%Y-%m-%d %H:%M")
+        slot_str_viejo = format_wall_time(cita.fecha_hora_inicio, "%Y-%m-%d_%H:%M")
+        fecha_vieja_fmt = format_wall_time(cita.fecha_hora_inicio, "%Y-%m-%d %H:%M")
         nombre_paciente_actual = (cita.paciente.nombre_completo if cita.paciente else None) or "Paciente"
         medico_user = cita.profesional.usuario if cita.profesional else None
         cita.estado = "CANCELADA"
@@ -655,8 +733,8 @@ async def ver_agenda_profesional(
         )
         agenda.append({
             "cita_id": str(c.id),
-            "hora_inicio": c.fecha_hora_inicio.strftime("%H:%M"),
-            "fecha": c.fecha_hora_inicio.strftime("%Y-%m-%d"),
+            "hora_inicio": format_wall_time(c.fecha_hora_inicio, "%H:%M"),
+            "fecha": format_wall_time(c.fecha_hora_inicio, "%Y-%m-%d"),
             "nombre_paciente": c.paciente.nombre_completo or "Paciente",
             "telefono": c.paciente.telefono,
             "motivo_consulta": c.motivo_consulta,

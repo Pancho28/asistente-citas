@@ -176,7 +176,7 @@ async def consultar_disponibilidad(
 
     # 7. Filtrar bloques libres restando Citas, Bloqueos y Redis Locks
     horarios_libres: list[str] = []
-    current_time_tz = now_tz()
+    current_time_tz = now_tz(perfil.usuario.zona_horaria if perfil.usuario else None)
 
     for slot_time, slot_start, slot_end in bloques_potenciales:
         slot_str = slot_time.strftime("%H:%M")

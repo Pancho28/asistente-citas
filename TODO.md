@@ -3,18 +3,46 @@
 > **Convención de Lectura Rápida (De lo más nuevo arriba a lo más antiguo abajo):**  
 > Este documento está ordenado en **orden cronológico inverso**. Las tareas pendientes (`[ ]`) de la iteración actual están siempre al inicio del archivo para que el agente ejecutor solo necesite leer las primeras líneas hasta encontrar el primer bloque ya completado (`[x]`).
 >
-> **Estado Actual:** 🟢 **Etapas 1 a 9 Completadas al 100% (65/65 Tests en Verde — Backlog Funcional Cerrado) | Listo para CI/CD y Despliegue en Producción ([`paso_prod.md`](./paso_prod.md))**
+> **Estado Actual:** 🟢 **En Producción en Railway (Bot Web + Worker ARQ + Postgres + Redis Activos | 67/67 Tests en Verde) | Pendiente: Mejora Onboarding Médico & CI/CD**
 
 ---
 
-## 🌐 Tareas Cross-Repo, CI/CD y Despliegue (GitHub, API Gateway & Railway — Pendientes)
+## 📋 Tareas Pendientes (Iteración Actual & Infraestructura)
+- [x] **Etapa 11 Completa — Suite de Administración y Operación SaaS en el Chatbot (`ADMIN`, completado el 2026-11-25 | `5/5` Etapa 11 PASS, `77/79` global):**
+  - [x] **1. Gestión de Doctores por nombre y Ficha 360° (`listar_y_gestionar_profesionales`):** Resuelve médicos por nombre/especialidad sin exigir UUID y añade `accion="DETALLE"` (horario, zona horaria, onboarding pendiente y citas activas) en [`src/services/admin_service.py`](src/services/admin_service.py) y [`src/agent/mcp_tools/admin.py`](src/agent/mcp_tools/admin.py).
+  - [x] **2. Edición administrativa y baja protegida de médicos:** Implementado `accion="EDITAR"` (nombre, teléfono, especialidad, zona horaria, tarifa, duración y horario) y `"DAR_DE_BAJA"` / `"REACTIVAR_CUENTA"` advirtiendo si existen citas futuras activas (`HAS_ACTIVE_APPOINTMENTS`).
+  - [x] **3. Gestión de Códigos de Invitación (`gestionar_codigos_invitacion`):** Listado filtrado (`VIGENTES`, `USADOS`, `TODOS`) y revocación inmediata (`"REVOCAR"`).
+  - [x] **4. Directorio y Bloqueo Efectivo de Pacientes (`gestionar_pacientes` + Webhook):** Búsqueda, historial/inasistencias, edición y bloqueo/reactivación (`USUARIOS.activo`), con cortafuegos en [`src/api/dependencies.py`](src/api/dependencies.py) y [`src/api/v1/webhook.py`](src/api/v1/webhook.py) rechazando botones e IA en 0 tokens (`blocked_inactive_user`).
+  - [x] **5. Mesa de Ayuda / Soporte de Citas (`gestionar_citas_soporte`):** Consulta global, cancelación/reprogramación de citas y `"CANCELAR_JORNADA_MEDICO"` por emergencia creando `BloqueoAgenda` y notificando a los pacientes afectados.
+  - [x] **6. Métricas Operativas y Financieras del SaaS (`consultar_metricas_plataforma`):** Médicos activos vs. con onboarding pendiente, pacientes nuevos/bloqueados, citas por estado, tasa de inasistencias e ingresos cobrados/proyectados (`HOY`, `SEMANA`, `MES`, `PERSONALIZADO`).
+  - [x] **7. Comunicados Directos a Médicos (`enviar_comunicado_medicos`):** Envío directo por Telegram/WhatsApp a `"TODOS_ACTIVOS"`, `"ONBOARDING_PENDIENTE"` o a un médico puntual.
+- [x] **Etapa 10 Completa — Notificaciones sin `Total: 0`, Huso Horario por Usuario, Resumen Semanal Filtrado y Onboarding Guiado Amable (Completado el 2026-11-25):**
+  - [x] **Notificaciones sin pacientes:** Omitido `Total de pacientes programados: 0` en [`src/workers/tasks.py`](src/workers/tasks.py) cuando no hay citas (respondiendo únicamente `"No tienes citas programadas para esta jornada."`).
+  - [x] **Huso horario por usuario/médico (`zona_horaria`):** Añadida columna `USUARIOS.zona_horaria` (migración `0003_timezone_and_onboarding`), helpers `normalize_timezone_name`, `now_tz(tz_name)`, `now_wall_utc` y `format_wall_time` en [`src/core/config.py`](src/core/config.py), y evaluación horaria por médico en `_do_heartbeat`.
+  - [x] **Resumen semanal filtrado:** Añadido `construir_resumen_dias_habilitados` en [`src/services/appointment_service.py`](src/services/appointment_service.py), conectado a `ver_agenda_profesional` (`dias_habilitados_en_rango`) y regla en [`src/agent/prompts.py`](src/agent/prompts.py) excluyendo días fuera de horario.
+  - [x] **Onboarding guiado amable del médico:** Añadida columna `PERFILES_PROFESIONALES.onboarding_campos_configurados`, tracker `obtener_estado_onboarding_medico` en [`src/services/onboarding_service.py`](src/services/onboarding_service.py) e inyección en [`src/agent/orchestrator.py`](src/agent/orchestrator.py) / [`src/agent/prompts.py`](src/agent/prompts.py) para recordar amablemente las 4 configuraciones pendientes (`horario_consulta`, `duracion_cita`, `tarifa_consulta`, `notificacion_diaria`).
+  - [x] **TDD & Migración:** Nueva suite [`tests/test_stage10_notifications_timezone_weekly_and_onboarding.py`](tests/test_stage10_notifications_timezone_weekly_and_onboarding.py) (`4/4` PASS) y migración `alembic upgrade head` aplicada (`0003_timezone_and_onboarding (head)`).
+- [ ] **Despliegue Par 2 + Etapa 10 en Railway (Web + Worker ARQ):** Subir los cambios de Par 2 (`DB_POOL_SIZE=5` / `DB_MAX_OVERFLOW=5` / `DB_POOL_TIMEOUT=15`) y Etapa 10 (migración `0003`), y verificar en Railway que `DATABASE_URL` apunte a `citas_medicas` y `REDIS_URL` termine en `/1` en ambos servicios.
+- [x] **Alineación Par 2 Compartido (`saas/PLAN.md` B.2, B.3 y Cutover Docker Raíz — Completado el 2026-11-25):**
+  - [x] **B.2 — Pools de PostgreSQL:** Acotados `DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=5`, `DB_POOL_TIMEOUT=15` en [`src/core/config.py`](src/core/config.py) y `build_engine_options` en [`src/core/database.py`](src/core/database.py) (cubierto en [`tests/test_database_and_redis_pair2_config.py`](tests/test_database_and_redis_pair2_config.py)).
+  - [x] **B.3 — Índice Redis `/1` y credenciales unificadas:** Actualizado default `REDIS_URL` en [`src/core/config.py`](src/core/config.py) a `redis://:redis_secure_password_2026@127.0.0.1:6380/1` junto con [`.env.example`](.env.example), `.env` y [`README.md`](README.md).
+  - [x] **Fase 4 — Cutover Docker Raíz + Alembic:** Levantado [`saas/docker-compose.yml`](../docker-compose.yml) (`saas_shared_postgres` `:5433` + `saas_shared_redis` `:6380`), aplicadas migraciones hasta `0002_seed_initial_admin (head)` contra `citas_medicas`, verificada conectividad en vivo (`usuarios: 2`, Redis `/1 -> True`), retirado `asistente-citas/docker-compose.yml` y actualizado [`README.md`](README.md) hacia `../docker-compose.yml`.
 - [ ] **CI/CD en GitHub Actions:** Crear workflow en `.github/workflows/ci.yml` que ejecute `pytest` automáticamente en cada `push` y `pull_request` hacia `main` antes de desplegar en Railway.
-- [ ] Programar en el repositorio del **API Gateway** el endpoint `POST /webhooks/{provider}/{app_id}` según el contrato de `SPEC.md` y [`paso_prod.md`](./paso_prod.md).
-- [ ] Aprovisionar en **Railway** PostgreSQL, Redis, el servicio Web (`asistente-citas-api`), el Worker (`asistente-citas-worker`) y registrar el webhook en Telegram siguiendo [`paso_prod.md`](./paso_prod.md).
+- [ ] *(Opcional Cross-Repo)* Programar en el repositorio del **API Gateway** el endpoint genérico `POST /webhooks/{provider}/{app_id}` según `SPEC.md` (actualmente ya funciona en producción mediante el prefijo `/asistente-citas/api/v1/webhook`).
+
+---
+
+## 💡 Mejoras a Futuro / Roadmap *(Por diseñar en `[PLAN]`)*
+- [ ] **Perfil Coordinador / Administrador de Médicos (Agenda Multi-Médico)** *(Agregado: 2026-11-19)*: Nuevo rol intermedio de negocio (distinto del `ADMIN` técnico del bot) que permita a un usuario llevar la agenda, bloqueos, citas y pagos de **varios médicos asignados** (requerirá tabla de vínculo gestor-profesional y selección del médico activo en contexto antes de ejecutar tools MCP).
+- [ ] **Integración con Google Calendar (Sincronización de Citas)** *(Agregado: 2026-11-19)*: Vincular la cuenta de Google Calendar de cada médico (OAuth 2.0 + refresh token cifrado) para crear, reagendar y cancelar eventos automáticamente en su calendario cuando cambie una cita (y opcionalmente consultar eventos externos como bloqueos al calcular disponibilidad).
 
 ---
 
 ## ✅ Historial Completado (De lo más reciente a lo más antiguo — Ya Verificado)
+
+### 🚀 Despliegue en Producción en Railway y Ajustes Finales (Completado)
+- [x] Aprovisionado en **Railway** PostgreSQL, Redis, el servicio Web (`asistente-citas` con `Dockerfile`, `entrypoint.sh` y `railway.toml`), el Worker (`asistente-citas-worker` con `railway.worker.toml`) y registrado el webhook en Telegram a través de `api-gateway-auth` siguiendo [`paso_prod.md`](./paso_prod.md).
+- [x] Unificada la cadena de modelos en `IA_MODELS` (con `gemini-4-hydrogen` como 3.ª opción multi-familia), configurados logs limpios propios (`src.*`) en [`src/main.py`](src/main.py) y fijada `timezone = ZoneInfo(settings.DEFAULT_TIMEZONE)` en [`WorkerSettings`](src/workers/tasks.py) (**67/67 tests en verde**).
 
 ### 🔔 Etapa 9: Jornada Partida, Desambiguación de Citas y Notificaciones Cruzadas (Completada)
 - [x] **1. Jornada partida en un mismo día (`hora_apertura_2` y `hora_cierre_2`):** Añadido segundo tramo horario diario en `configurar_horario_base_y_perfil` ([`src/services/onboarding_service.py`](src/services/onboarding_service.py) y [`src/agent/mcp_tools/doctor.py`](src/agent/mcp_tools/doctor.py)) y actualizado `_formatear_horario_semanal` en [`src/services/appointment_service.py`](src/services/appointment_service.py) para múltiples tramos.

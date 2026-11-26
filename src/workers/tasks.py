@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 from arq import cron
@@ -7,7 +7,7 @@ from arq.connections import RedisSettings
 from sqlalchemy import select, cast, Date, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.core.config import get_settings, now_tz
+from src.core.config import format_wall_time, get_settings, now_tz, now_wall_utc
 from src.core.database import async_session_factory
 from src.models.appointment import Cita
 from src.models.user import PerfilProfesional, Usuario
@@ -22,8 +22,8 @@ settings = get_settings()
 async def _do_enviar_recordatorios(db: AsyncSession) -> int:
     current_tz = now_tz()
     manana = current_tz.date() + timedelta(days=1)
-    inicio_manana = datetime.combine(manana, time(0, 0, 0), tzinfo=current_tz.tzinfo)
-    fin_manana = datetime.combine(manana, time(23, 59, 59), tzinfo=current_tz.tzinfo)
+    inicio_manana = datetime.combine(manana, time(0, 0, 0), tzinfo=timezone.utc)
+    fin_manana = datetime.combine(manana, time(23, 59, 59), tzinfo=timezone.utc)
 
     # Buscar citas confirmadas del día siguiente con recordatorio pendiente
     stmt = (
@@ -53,7 +53,7 @@ async def _do_enviar_recordatorios(db: AsyncSession) -> int:
             else WhatsAppAdapter()
         )
 
-        hora_fmt = cita.fecha_hora_inicio.strftime("%H:%M")
+        hora_fmt = format_wall_time(cita.fecha_hora_inicio, "%H:%M")
         nombre_paciente = cita.paciente.nombre_completo or "Estimado(a) paciente"
         text = (
             f"Hola {nombre_paciente}, te recordamos tu cita médica para mañana a las {hora_fmt}.\n\n"
@@ -92,12 +92,12 @@ async def enviar_recordatorios_diarios_pacientes(ctx: dict[str, Any]) -> int:
 
 
 async def _do_heartbeat(db: AsyncSession) -> dict[str, int]:
-    current_tz = now_tz()
+    current_wall_utc = now_wall_utc()
 
     # 1. Cierre automático de citas pasadas
     stmt_past = select(Cita).where(
         Cita.estado.in_(["CONFIRMADA", "CONFIRMADA_PACIENTE"]),
-        Cita.fecha_hora_fin < current_tz,
+        Cita.fecha_hora_fin < current_wall_utc,
     )
     res_past = await db.execute(stmt_past)
     citas_pasadas = res_past.scalars().all()
@@ -107,8 +107,7 @@ async def _do_heartbeat(db: AsyncSession) -> dict[str, int]:
 
     count_completadas = len(citas_pasadas)
 
-    # 2. Envío de resumen de agenda a médicos configurados en esta hora
-    hora_actual_hour = current_tz.hour
+    # 2. Envío de resumen de agenda a médicos configurados en su hora local
     stmt_prof = (
         select(PerfilProfesional)
         .options(selectinload(PerfilProfesional.usuario))
@@ -119,18 +118,20 @@ async def _do_heartbeat(db: AsyncSession) -> dict[str, int]:
 
     count_resumenes = 0
     for perfil in perfiles:
-        if perfil.hora_resumen_diario.hour != hora_actual_hour:
+        doctor_tz_name = perfil.usuario.zona_horaria if perfil.usuario else None
+        doctor_now = now_tz(doctor_tz_name)
+        if perfil.hora_resumen_diario.hour != doctor_now.hour:
             continue
-        if perfil.ultimo_resumen_enviado_en and perfil.ultimo_resumen_enviado_en >= current_tz.date():
-            continue  # Idempotencia: ya se envió hoy
+        if perfil.ultimo_resumen_enviado_en and perfil.ultimo_resumen_enviado_en >= doctor_now.date():
+            continue  # Idempotencia: ya se envió hoy en su zona horaria
 
         target_date = (
-            current_tz.date()
+            doctor_now.date()
             if perfil.alcance_resumen_diario == "AGENDA_HOY"
-            else current_tz.date() + timedelta(days=1)
+            else doctor_now.date() + timedelta(days=1)
         )
-        inicio_dia = datetime.combine(target_date, time(0, 0, 0), tzinfo=current_tz.tzinfo)
-        fin_dia = datetime.combine(target_date, time(23, 59, 59), tzinfo=current_tz.tzinfo)
+        inicio_dia = datetime.combine(target_date, time(0, 0, 0), tzinfo=timezone.utc)
+        fin_dia = datetime.combine(target_date, time(23, 59, 59), tzinfo=timezone.utc)
 
         stmt_citas_dia = (
             select(Cita)
@@ -147,17 +148,23 @@ async def _do_heartbeat(db: AsyncSession) -> dict[str, int]:
         citas_dia = res_dia.scalars().all()
 
         alcance_nombre = "hoy" if perfil.alcance_resumen_diario == "AGENDA_HOY" else "mañana"
-        resumen_lineas = [
-            f"📋 <b>Resumen de Agenda para {alcance_nombre} ({target_date.strftime('%d/%m/%Y')}):</b>",
-            f"Total de pacientes programados: {len(citas_dia)}",
-            "",
-        ]
+        encabezado = (
+            f"📋 <b>Resumen de Agenda para {alcance_nombre} ({target_date.strftime('%d/%m/%Y')}):</b>"
+        )
 
         if not citas_dia:
-            resumen_lineas.append("No tienes citas programadas para esta jornada.")
+            resumen_lineas = [
+                encabezado,
+                "No tienes citas programadas para esta jornada.",
+            ]
         else:
+            resumen_lineas = [
+                encabezado,
+                f"Total de pacientes programados: {len(citas_dia)}",
+                "",
+            ]
             for c in citas_dia:
-                h_fmt = c.fecha_hora_inicio.strftime("%H:%M")
+                h_fmt = format_wall_time(c.fecha_hora_inicio, "%H:%M")
                 p_nom = c.paciente.nombre_completo or "Paciente"
                 conf = " (Confirmó ✅)" if c.estado == "CONFIRMADA_PACIENTE" else ""
                 resumen_lineas.append(f"• <b>{h_fmt}</b> — {p_nom}{conf}")
@@ -175,7 +182,7 @@ async def _do_heartbeat(db: AsyncSession) -> dict[str, int]:
                 text=text_resumen,
             )
             if ok:
-                perfil.ultimo_resumen_enviado_en = current_tz.date()
+                perfil.ultimo_resumen_enviado_en = doctor_now.date()
                 count_resumenes += 1
         except Exception as exc:
             logger.error("[WORKER] Error al enviar resumen a médico %s: %s", perfil.id, exc)

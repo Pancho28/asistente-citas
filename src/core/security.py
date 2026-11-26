@@ -24,6 +24,10 @@ ROLE_PERMISSIONS_MAP: dict[RoleEnum, frozenset[str]] = {
     RoleEnum.ADMIN: frozenset({
         "admin:generar_invitacion",
         "admin:gestionar_profesionales",
+        "admin:gestionar_pacientes",
+        "admin:soporte_citas",
+        "admin:ver_metricas",
+        "admin:enviar_comunicados",
         "admin:cambiar_vista",
         "disponibilidad:consultar",
         "agenda:ver_pacientes_dia",

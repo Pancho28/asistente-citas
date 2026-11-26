@@ -78,12 +78,21 @@ async def get_user_context(
         else:
             permissions = ROLE_PERMISSIONS_MAP.get(role, frozenset())
 
+        stmt_active = select(Usuario).where(Usuario.id == user_uuid)
+        existing_user = (await db.execute(stmt_active)).scalar_one_or_none()
+        is_active = (
+            True
+            if (not existing_user or existing_user.rol_sistema == "ADMIN")
+            else bool(existing_user.activo)
+        )
+
         return UserContext(
             user_id=user_uuid,
             external_chat_id=x_external_chat_id,
             channel=channel,
             role=role,
             permissions=permissions,
+            is_active=is_active,
         )
 
     # 3. Modo A: Passthrough desde el Gateway (public_paths)
@@ -136,10 +145,13 @@ async def get_user_context(
     if user.rol_sistema == "ADMIN":
         perms.add("admin:cambiar_vista")
 
+    is_active = True if user.rol_sistema == "ADMIN" else bool(user.activo)
+
     return UserContext(
         user_id=user.id,
         external_chat_id=user.external_chat_id,
         channel=channel,
         role=effective_role,
         permissions=frozenset(perms),
+        is_active=is_active,
     )

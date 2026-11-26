@@ -16,7 +16,10 @@ from src.services.appointment_service import (
 )
 from src.models.schedule import HorarioBase
 from sqlalchemy import select
-from src.services.onboarding_service import canjear_codigo_invitacion as service_canjear_codigo
+from src.services.onboarding_service import (
+    canjear_codigo_invitacion as service_canjear_codigo,
+    obtener_estado_onboarding_medico,
+)
 from src.core.exceptions import (
     SlotTakenError,
     CancellationWindowExpiredError,
@@ -264,11 +267,13 @@ async def canjear_codigo_invitacion_medico(
             frase_codigo=frase_codigo,
             nombre_profesional=nombre_profesional,
         )
+        onboarding_estado = await obtener_estado_onboarding_medico(db, ctx.user_id)
         return {
             "success": True,
             "code": "CODE_REDEEMED",
             "profesional_id": str(perfil.id),
             "especialidad": perfil.especialidad,
+            "onboarding_estado": onboarding_estado,
             "message": f"¡Felicidades {nombre_profesional}! Tu cuenta ha sido activada con rol MÉDICO.",
         }
     except (ValidationError, EntityNotFoundError) as exc:

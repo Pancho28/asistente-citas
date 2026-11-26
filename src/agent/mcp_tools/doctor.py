@@ -9,6 +9,7 @@ from src.agent.mcp_tools.registry import (
 )
 from src.services.appointment_service import (
     ver_agenda_profesional as service_ver_agenda,
+    obtener_resumen_horario_y_dias_medico as service_resumen_dias,
     bloquear_horario_agenda as service_bloquear_horario,
     agendar_o_mover_cita_manual_medico as service_cita_manual,
 )
@@ -18,6 +19,7 @@ from src.services.finance_service import (
 )
 from src.services.onboarding_service import (
     configurar_horario_base_y_perfil as service_configurar_perfil,
+    obtener_estado_onboarding_medico,
 )
 from src.core.exceptions import EntityNotFoundError, ValidationError, SlotTakenError, AppError
 
@@ -51,10 +53,19 @@ async def ver_agenda_profesional(
             fecha_fin=parsed_fin,
             filtro_estado=filtro,  # type: ignore
         )
+        horario_texto, dias_habilitados = await service_resumen_dias(
+            db=db,
+            profesional_usuario_id=ctx.user_id,
+            fecha_inicio=parsed_inicio,
+            fecha_fin=parsed_fin,
+            citas_agenda=citas,
+        )
         return {
             "success": True,
             "total_citas": len(citas),
             "citas": citas,
+            "horario_semanal_configurado": horario_texto,
+            "dias_habilitados_en_rango": dias_habilitados,
             "ui_hint": "SHOW_DOCTOR_ACTION_BUTTONS",
         }
     except EntityNotFoundError as exc:
@@ -119,15 +130,17 @@ async def configurar_horario_base_y_perfil(
     tarifa_base_consulta: float | None = None,
     hora_resumen_diario: str | None = None,
     alcance_resumen_diario: str | None = None,
+    zona_horaria: str | None = None,
 ) -> dict[str, Any]:
     """
     Actualiza la jornada semanal (continua o partida con horario de almuerzo), cierra días completos,
-    o cambia duración de citas, tarifa base u hora de resumen diario del médico.
+    o cambia duración de citas, tarifa base, hora de resumen diario o zona horaria del médico.
     dias_semana: lista de enteros a habilitar/modificar (1=Lunes ... 6=Sábado, 0=Domingo).
     hora_apertura / hora_cierre: formato HH:MM (primer turno o jornada continua).
     hora_apertura_2 / hora_cierre_2: formato HH:MM (segundo turno opcional para jornada partida).
     dias_cerrados: lista de enteros de días que el médico desea cerrar/desactivar por completo
     (1=Lunes ... 6=Sábado, 0=Domingo), sin necesidad de indicar horas.
+    zona_horaria: zona horaria IANA o ciudad (ej. 'America/Caracas', 'America/Bogota', 'Europe/Madrid').
     """
     ctx = current_user_ctx.get()
     db = current_db_session.get()
@@ -153,13 +166,17 @@ async def configurar_horario_base_y_perfil(
             tarifa_base_consulta=tarifa_dec,
             hora_resumen_diario=parsed_resumen,
             alcance_resumen_diario=alcance_resumen_diario,
+            zona_horaria=zona_horaria,
         )
+        onboarding_estado = await obtener_estado_onboarding_medico(db, ctx.user_id)
         return {
             "success": True,
             "code": "PROFILE_UPDATED",
             "duracion_cita_minutos": perfil.duracion_cita_minutos,
             "tarifa_base_consulta": float(perfil.tarifa_base_consulta),
             "hora_resumen_diario": perfil.hora_resumen_diario.strftime("%H:%M"),
+            "zona_horaria": onboarding_estado["zona_horaria"],
+            "onboarding_estado": onboarding_estado,
             "message": "Configuración de agenda actualizada con éxito.",
         }
     except (EntityNotFoundError, ValidationError) as exc:

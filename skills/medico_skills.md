@@ -14,7 +14,7 @@ Obtiene la lista cronológica de citas del médico para un día o rango de fecha
   * `fecha_fin` (`str`, opcional): Fecha final `YYYY-MM-DD` (si se omite, consulta solo `fecha_inicio`).
   * `filtro_estado` (`str`, opcional): `"TODAS"`, `"PENDIENTES_HOY"` (solo las que faltan por atender en el día), `"COMPLETADAS"`, `"IMPAGAS"`.
 * **Parámetros inyectados por Gateway:** `profesional_usuario_id = X-User-Id`
-* **Retorno esperado:** Lista detallada con `cita_id`, `hora_inicio`, `nombre_paciente`, `telefono`, `motivo_consulta`, `estado`, `respuesta_recordatorio`, `monto_acordado`, `monto_pagado` y `estado_financiero`, más `"ui_hint": "SHOW_DOCTOR_ACTION_BUTTONS"`.
+* **Retorno esperado:** Lista detallada con `cita_id`, `hora_inicio`, `nombre_paciente`, `telefono`, `motivo_consulta`, `estado`, `respuesta_recordatorio`, `monto_acordado`, `monto_pagado` y `estado_financiero`, además de `horario_semanal_configurado`, `dias_habilitados_en_rango` (excluyendo días en los que el médico no da consulta y no tiene citas, ej. sábados y domingos si solo trabaja de lunes a viernes) y `"ui_hint": "SHOW_DOCTOR_ACTION_BUTTONS"`.
 
 ---
 
@@ -52,7 +52,9 @@ Actualiza la jornada semanal recurrente del médico (`HORARIOS_BASE`), permite c
   * `tarifa_base_consulta` (`float`, opcional): Precio por defecto de la consulta.
   * `hora_resumen_diario` (`str`, opcional): Hora en punto en formato `HH:00` (ej. `"08:00"`, `"12:00"`, `"20:00"`).
   * `alcance_resumen_diario` (`str`, opcional): `"AGENDA_HOY"` o `"AGENDA_MANANA"`.
+  * `zona_horaria` (`str`, opcional): Zona horaria IANA del médico (ej. `"America/Caracas"`, `"America/Bogota"`, `"America/Mexico_City"`, `"Europe/Madrid"`).
 * **Parámetros inyectados por Gateway:** `profesional_usuario_id = X-User-Id`
+* **Retorno esperado:** Confirmación de los valores actualizados más `onboarding_estado` (`onboarding_completo` y lista `pendientes` con sugerencias amables para cualquier ajuste inicial que aún falte por configurar: `horario_consulta`, `duracion_cita`, `tarifa_consulta`, `notificacion_diaria`).
 
 ---
 

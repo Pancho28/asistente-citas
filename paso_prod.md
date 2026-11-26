@@ -64,9 +64,12 @@ Genera una cadena aleatoria segura (de 32 a 64 caracteres alfanuméricos, por ej
 
 Debes crear los recursos **dentro del mismo Proyecto de Railway** donde corre tu `api-gateway-auth` para aprovechar la red privada interna (`*.railway.internal`).
 
-### 3.1 Aprovisionar PostgreSQL y Redis Nativos
-1. En el lienzo de tu proyecto en Railway, haz clic en **`+ New`** ➔ **`Database`** ➔ **`Add PostgreSQL`**.
-2. Haz clic nuevamente en **`+ New`** ➔ **`Database`** ➔ **`Add Redis`**.
+### 3.1 Conectar al Par Compartido de PostgreSQL y Redis (Par 2)
+De acuerdo con la arquitectura del SaaS (`../ARCHITECTURE.md`), no se crean instancias dedicadas por microservicio: se reutiliza el **Par 2 compartido** del Proyecto Core en Railway:
+1. En la instancia **PostgreSQL Compartida**, crea la base de datos lógica `citas_medicas` (`CREATE DATABASE citas_medicas;`).
+2. En la instancia **Redis Compartida**, utiliza el **índice lógico `/1`** (`0..15`, reservando `/0` para `reservas-manager`).
+
+> *(Solo si aún no existe el Par 2 compartido en el Proyecto Core de Railway, créalo una única vez con `+ New` ➔ `Database` ➔ `Add PostgreSQL` y `Add Redis`, separado del Par 1 exclusivo del Gateway).*
 
 ### 3.2 Crear el Servicio Principal (`asistente-citas-api`)
 1. Haz clic en **`+ New`** ➔ **`GitHub Repo`** y selecciona el repositorio de `asistente-citas`.
@@ -88,9 +91,13 @@ ENVIRONMENT=production
 DEFAULT_TIMEZONE=America/Caracas
 PORT=8005
 
-# 2. Conexiones Nativas por Red Privada de Railway (El código convierte automáticamente postgres:// a postgresql+asyncpg://)
-DATABASE_URL=${{Postgres.DATABASE_PRIVATE_URL}}
-REDIS_URL=${{Redis.REDIS_PRIVATE_URL}}
+# 2. Conexiones al Par 2 Compartido por Red Privada de Railway (src/core/config.py normaliza postgres:// a postgresql+asyncpg://)
+# Apuntar a la BD lógica 'citas_medicas', acotar el pool del Par 2 y usar el índice Redis '/1'
+DATABASE_URL=postgresql://${{PostgresShared.PGUSER}}:${{PostgresShared.PGPASSWORD}}@${{PostgresShared.RAILWAY_PRIVATE_DOMAIN}}:5432/citas_medicas
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=5
+DB_POOL_TIMEOUT=15
+REDIS_URL=${{RedisShared.REDIS_PRIVATE_URL}}/1
 
 # 3. Seguridad Interna con el API Gateway (Debe ser idéntica a la configurada en api-gateway-auth)
 INTERNAL_GATEWAY_SECRET=tu_clave_secreta_compartida_con_el_gateway_produccion

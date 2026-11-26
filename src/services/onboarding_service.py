@@ -13,9 +13,92 @@ from src.core.exceptions import (
     EntityNotFoundError,
     InvalidInvitationCodeError,
     PermissionDeniedError,
+    ValidationError,
     AppError,
 )
-from src.core.config import now_tz
+from src.core.config import get_settings, normalize_timezone_name, now_tz
+
+
+ONBOARDING_STEPS_ORDER: list[tuple[str, str, str]] = [
+    (
+        "horario_consulta",
+        "Días y horario de consulta",
+        "¿Qué días de la semana pasas consulta y en qué horario (puedes indicar jornada continua o partida con pausa de almuerzo)?",
+    ),
+    (
+        "duracion_cita",
+        "Duración de cada cita",
+        "¿Cuántos minutos dura cada consulta (ej. 30, 45 o 60 minutos)?",
+    ),
+    (
+        "tarifa_consulta",
+        "Tarifa base de consulta",
+        "¿Cuál es el costo o tarifa base de tu consulta?",
+    ),
+    (
+        "notificacion_diaria",
+        "Notificación diaria de pacientes",
+        "¿A qué hora deseas recibir tu resumen diario de pacientes y si prefieres recibir la agenda del mismo día o del día siguiente?",
+    ),
+]
+
+
+def _parse_configured_fields(raw_csv: str | None) -> set[str]:
+    if not raw_csv:
+        return set()
+    return {item.strip() for item in raw_csv.split(",") if item.strip()}
+
+
+def _serialize_configured_fields(fields: set[str]) -> str:
+    ordered = [key for key, _, _ in ONBOARDING_STEPS_ORDER if key in fields]
+    return ",".join(ordered)
+
+
+async def obtener_estado_onboarding_medico(
+    db: AsyncSession,
+    usuario_id: UUID,
+) -> dict[str, Any]:
+    """Evalúa individualmente qué configuraciones iniciales faltan por definir en el perfil médico."""
+    settings = get_settings()
+    stmt = (
+        select(PerfilProfesional)
+        .options(
+            selectinload(PerfilProfesional.horarios_base),
+            selectinload(PerfilProfesional.usuario),
+        )
+        .where(PerfilProfesional.usuario_id == usuario_id)
+    )
+    perfil = (await db.execute(stmt)).scalars().first()
+    if not perfil:
+        return {
+            "onboarding_completo": True,
+            "pendientes": [],
+            "zona_horaria": settings.DEFAULT_TIMEZONE,
+        }
+
+    campos_guardados = _parse_configured_fields(perfil.onboarding_campos_configurados)
+    tiene_horario = any(hb.activo for hb in perfil.horarios_base)
+    configurados = {
+        "horario_consulta": tiene_horario or ("horario_consulta" in campos_guardados),
+        "duracion_cita": "duracion_cita" in campos_guardados,
+        "tarifa_consulta": "tarifa_consulta" in campos_guardados,
+        "notificacion_diaria": "notificacion_diaria" in campos_guardados,
+    }
+    pendientes = [
+        {"campo": key, "titulo": titulo, "pregunta_amable": pregunta}
+        for key, titulo, pregunta in ONBOARDING_STEPS_ORDER
+        if not configurados.get(key, False)
+    ]
+    zona_horaria = (
+        perfil.usuario.zona_horaria
+        if perfil.usuario and perfil.usuario.zona_horaria
+        else settings.DEFAULT_TIMEZONE
+    )
+    return {
+        "onboarding_completo": len(pendientes) == 0,
+        "pendientes": pendientes,
+        "zona_horaria": zona_horaria,
+    }
 
 
 async def generar_codigo_invitacion(
@@ -115,15 +198,19 @@ async def configurar_horario_base_y_perfil(
     tarifa_base_consulta: Decimal | None = None,
     hora_resumen_diario: time | None = None,
     alcance_resumen_diario: Literal["AGENDA_HOY", "AGENDA_MANANA"] | None = None,
+    zona_horaria: str | None = None,
 ) -> PerfilProfesional:
     """
-    Actualiza la configuración del perfil y la jornada semanal base del médico.
+    Actualiza la configuración del perfil, zona horaria y jornada semanal base del médico.
     Permite abrir/modificar días con uno o dos tramos (jornada partida con hora_apertura_2/hora_cierre_2)
     y cerrar días completos (dias_cerrados) de forma incremental.
     """
     stmt = (
         select(PerfilProfesional)
-        .options(selectinload(PerfilProfesional.horarios_base))
+        .options(
+            selectinload(PerfilProfesional.horarios_base),
+            selectinload(PerfilProfesional.usuario),
+        )
         .where(PerfilProfesional.usuario_id == profesional_usuario_id)
     )
     res = await db.execute(stmt)
@@ -131,14 +218,30 @@ async def configurar_horario_base_y_perfil(
     if not perfil:
         raise EntityNotFoundError("Perfil profesional")
 
+    campos = _parse_configured_fields(perfil.onboarding_campos_configurados)
+
+    if zona_horaria is not None:
+        try:
+            tz_norm = normalize_timezone_name(zona_horaria)
+        except Exception as exc:
+            raise ValidationError(
+                f"Zona horaria '{zona_horaria}' no válida. Usa formato IANA (ej. 'America/Caracas', 'America/Bogota', 'Europe/Madrid')."
+            ) from exc
+        if perfil.usuario:
+            perfil.usuario.zona_horaria = tz_norm
+
     if duracion_cita_minutos is not None:
         perfil.duracion_cita_minutos = duracion_cita_minutos
+        campos.add("duracion_cita")
     if tarifa_base_consulta is not None:
         perfil.tarifa_base_consulta = tarifa_base_consulta
+        campos.add("tarifa_consulta")
     if hora_resumen_diario is not None:
         perfil.hora_resumen_diario = hora_resumen_diario
+        campos.add("notificacion_diaria")
     if alcance_resumen_diario is not None:
         perfil.alcance_resumen_diario = alcance_resumen_diario
+        campos.add("notificacion_diaria")
 
     # Cerrar días completos sin necesidad de horas de apertura/cierre
     if dias_cerrados:
@@ -148,6 +251,7 @@ async def configurar_horario_base_y_perfil(
 
     # Si se especificaron días y horas de apertura/cierre, actualizar jornada base de forma incremental
     if dias_semana and hora_apertura and hora_cierre:
+        campos.add("horario_consulta")
         # Desactivar únicamente los horarios de los días indicados en dias_semana
         for hb in perfil.horarios_base:
             if hb.dia_semana in dias_semana:
@@ -173,6 +277,7 @@ async def configurar_horario_base_y_perfil(
                 )
                 db.add(segundo_hb)
 
+    perfil.onboarding_campos_configurados = _serialize_configured_fields(campos)
     await db.commit()
     await db.refresh(perfil)
     return perfil
