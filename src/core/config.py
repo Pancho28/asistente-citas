@@ -1,6 +1,6 @@
 from functools import lru_cache
 from zoneinfo import ZoneInfo
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -95,7 +95,60 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def now_tz() -> datetime:
-    """Devuelve la fecha y hora actual en la zona horaria configurada."""
+COMMON_TZ_ALIASES: dict[str, str] = {
+    "caracas": "America/Caracas",
+    "venezuela": "America/Caracas",
+    "bogota": "America/Bogota",
+    "colombia": "America/Bogota",
+    "lima": "America/Lima",
+    "quito": "America/Guayaquil",
+    "santiago": "America/Santiago",
+    "buenos_aires": "America/Argentina/Buenos_Aires",
+    "argentina": "America/Argentina/Buenos_Aires",
+    "mexico": "America/Mexico_City",
+    "cdmx": "America/Mexico_City",
+    "madrid": "Europe/Madrid",
+    "espana": "Europe/Madrid",
+    "miami": "America/New_York",
+}
+
+
+def normalize_timezone_name(tz_name: str | None) -> str:
+    """Normaliza y valida un nombre de zona horaria IANA o alias común."""
     settings = get_settings()
-    return datetime.now(ZoneInfo(settings.DEFAULT_TIMEZONE))
+    if not tz_name or not tz_name.strip():
+        return settings.DEFAULT_TIMEZONE
+    raw = tz_name.strip()
+    key = raw.lower().replace(" ", "_")
+    candidate = COMMON_TZ_ALIASES.get(key, raw)
+    ZoneInfo(candidate)
+    return candidate
+
+
+def resolve_zoneinfo(tz_name: str | None = None) -> ZoneInfo:
+    """Resuelve ZoneInfo seguro con fallback a DEFAULT_TIMEZONE."""
+    settings = get_settings()
+    try:
+        return ZoneInfo(normalize_timezone_name(tz_name))
+    except Exception:
+        return ZoneInfo(settings.DEFAULT_TIMEZONE)
+
+
+def now_tz(tz_name: str | None = None) -> datetime:
+    """Devuelve la fecha y hora actual en la zona horaria indicada (o DEFAULT_TIMEZONE)."""
+    return datetime.now(resolve_zoneinfo(tz_name))
+
+
+def now_wall_utc(tz_name: str | None = None) -> datetime:
+    """
+    Proyecta la fecha/hora local de la zona horaria indicada con tzinfo=timezone.utc
+    para comparar de forma consistente contra columnas nominales TIMESTAMPTZ.
+    """
+    return now_tz(tz_name).replace(tzinfo=timezone.utc)
+
+
+def format_wall_time(dt: datetime, fmt: str = "%H:%M") -> str:
+    """Formatea la hora nominal guardada en UTC sin desplazamiento por sesión de BD."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).strftime(fmt)
+    return dt.strftime(fmt)

@@ -20,6 +20,7 @@ class UserContext(BaseModel):
     channel: ChannelOrigin
     role: RoleEnum
     permissions: frozenset[str] = Field(default_factory=frozenset)
+    is_active: bool = True
 
     model_config = ConfigDict(frozen=True)
 

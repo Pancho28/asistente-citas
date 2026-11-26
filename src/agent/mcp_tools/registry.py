@@ -72,7 +72,12 @@ def get_tools_for_user(ctx: UserContext) -> list[Callable]:
     elif ctx.role == RoleEnum.ADMIN:
         return [
             admin_tools.generar_codigo_invitacion_medico,
+            admin_tools.gestionar_codigos_invitacion,
             admin_tools.listar_y_gestionar_profesionales,
+            admin_tools.gestionar_pacientes,
+            admin_tools.gestionar_citas_soporte,
+            admin_tools.consultar_metricas_plataforma,
+            admin_tools.enviar_comunicado_medicos,
             admin_tools.cambiar_modo_vista_sesion,
         ]
 

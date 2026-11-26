@@ -56,6 +56,24 @@ async def receive_webhook(
     event = parse_incoming_webhook(payload, ctx.channel)
     adapter = TelegramAdapter() if ctx.channel == ChannelOrigin.TELEGRAM else WhatsAppAdapter()
 
+    # Cortafuegos para usuarios suspendidos o bloqueados (0 tokens de IA)
+    if not ctx.is_active:
+        if event.event_type == "CALLBACK" and event.callback_query_id:
+            await adapter.answer_callback_query(event.callback_query_id)
+        suspended_msg = (
+            "Tu cuenta se encuentra temporalmente suspendida. "
+            "Por favor contacta al administrador para más información."
+        )
+        await adapter.send_message(recipient=ctx.external_chat_id, text=suspended_msg)
+        return {
+            "status": "blocked_inactive_user",
+            "event_type": event.event_type,
+            "user_id": str(ctx.user_id),
+            "role": ctx.role.value,
+            "channel": ctx.channel.value,
+            "reply_text": suspended_msg,
+        }
+
     agent_response: AgentResponse
 
     # 1. Semáforo: Ruta Rápida de Botones

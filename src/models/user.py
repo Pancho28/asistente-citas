@@ -18,6 +18,9 @@ class Usuario(Base):
     telefono: Mapped[str | None] = mapped_column(String(50), nullable=True)
     rol_sistema: Mapped[str] = mapped_column(String(20), default="PACIENTE", nullable=False)
     modo_vista_actual: Mapped[str] = mapped_column(String(20), default="PACIENTE", nullable=False)
+    zona_horaria: Mapped[str] = mapped_column(
+        String(64), default="America/Caracas", server_default="America/Caracas", nullable=False
+    )
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -68,6 +71,9 @@ class PerfilProfesional(Base):
     hora_resumen_diario: Mapped[time] = mapped_column(Time, default=time(12, 0), nullable=False)
     alcance_resumen_diario: Mapped[str] = mapped_column(String(20), default="AGENDA_HOY", nullable=False)
     ultimo_resumen_enviado_en: Mapped[date | None] = mapped_column(Date, nullable=True)
+    onboarding_campos_configurados: Mapped[str] = mapped_column(
+        String(255), default="", server_default="", nullable=False
+    )
     acepta_nuevas_citas: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="perfil_profesional")

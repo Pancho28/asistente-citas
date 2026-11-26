@@ -56,7 +56,7 @@ El microservicio **nunca** confía en el contenido del texto del chat para deter
 * **Modo B (Cabeceras pre-resueltas por Middleware/Tests):** Si el Gateway (o un futuro middleware dedicado) ya inyecta `X-User-Id`, `X-User-Role`, `X-Channel-Origin` y `X-External-Chat-Id`, `dependencies.py` construye el `UserContext` directamente sin sobrecarga adicional.
 
 ### 3.2 Jerarquía de Roles
-1. **`ADMIN` (Superusuario):** Control total sobre la plataforma. Puede generar frases/códigos de invitación para dar de alta médicos, listar profesionales activos y ver métricas globales. **Es el único rol que puede cambiar de modo de vista** (`/modo_admin`, `/modo_medico`, `/modo_paciente`) para simular y probar los flujos de otros roles.
+1. **`ADMIN` (Superusuario):** Control total y soporte operativo sobre la plataforma. Puede generar, listar y revocar códigos de invitación; consultar fichas detalladas, editar datos/horarios o activar/suspender/dar de baja médicos buscando por nombre o UUID; buscar, editar y bloquear/reactivar pacientes (`USUARIOS.activo = false` bloquea el uso del bot en tiempo real); intervenir citas por soporte o emergencia médica; consultar métricas globales de operación/finanzas y enviar comunicados directos a los médicos. **Es el único rol que puede cambiar de modo de vista** (`/modo_admin`, `/modo_medico`, `/modo_paciente`) para simular y probar los flujos de otros roles.
 2. **`MEDICO` (Profesional de la Salud):** Gestiona su propio perfil, configura su horario base semanal, registra bloqueos por imprevistos, consulta su agenda del día/semana, agenda o mueve citas manualmente (pudiendo registrar el motivo de consulta), registra pagos/descuentos y consulta sus ganancias. No puede cambiar su modo de vista.
 3. **`PACIENTE` (Usuario Estándar):** Consulta horarios disponibles, agenda citas propias (sin que el bot le exija motivo de consulta, aunque se guarda si lo menciona espontáneamente), consulta sus próximas citas, cancela o reagenda (respetando el tiempo mínimo de anticipación del médico) y confirma asistencia en los recordatorios.
 
@@ -85,6 +85,7 @@ erDiagram
         varchar telefono
         varchar rol_sistema "ADMIN | MEDICO | PACIENTE"
         varchar modo_vista_actual "Solo modificable si rol_sistema == ADMIN"
+        varchar zona_horaria "Default America/Caracas (IANA timezone)"
         boolean activo
         timestamptz created_at
     }
@@ -113,6 +114,7 @@ erDiagram
         time hora_resumen_diario "Default 12:00:00"
         varchar alcance_resumen_diario "AGENDA_HOY | AGENDA_MANANA"
         date ultimo_resumen_enviado_en
+        varchar onboarding_campos_configurados "CSV de pasos confirmados: horario_consulta,duracion_cita,tarifa_consulta,notificacion_diaria"
         boolean acepta_nuevas_citas
     }
 
@@ -199,11 +201,12 @@ Redis cumple tres funciones dentro de la misma instancia (usando el índice lóg
    * **Consulta:** Selecciona todas las citas cuya `fecha_hora_inicio` corresponda al día siguiente (`CURRENT_DATE + 1`), con `estado = 'CONFIRMADA'` y `recordatorio_paciente_enviado = false`.
    * **Acción:** Envía el mensaje con botones interactivos `[ Confirmar Asistencia ]` y `[ Cancelar Cita ]`, y marca `recordatorio_paciente_enviado = true`.
 2. **Heartbeat Horario de Resumen para Médicos y Cierre de Citas (Cada hora en punto):**
-   * **Cierre automático de citas pasadas:** Actualiza a `estado = 'COMPLETADA'` todas las citas cuya `fecha_hora_fin < NOW()` y que sigan en `CONFIRMADA` o `CONFIRMADA_PACIENTE`.
-   * **Envío de resumen al médico:** Busca en `PERFILES_PROFESIONALES` aquellos médicos donde `hora_resumen_diario == HORA_ACTUAL` y `(ultimo_resumen_enviado_en IS NULL OR ultimo_resumen_enviado_en < CURRENT_DATE)`.
+   * **Cierre automático de citas pasadas:** Actualiza a `estado = 'COMPLETADA'` todas las citas cuya `fecha_hora_fin < NOW()` (comparando en tiempo nominal consistente con la zona horaria) y que sigan en `CONFIRMADA` o `CONFIRMADA_PACIENTE`.
+   * **Envío de resumen al médico:** Evalúa la hora local actual según `USUARIOS.zona_horaria` (fallback `DEFAULT_TIMEZONE`) y busca en `PERFILES_PROFESIONALES` aquellos médicos donde `hora_resumen_diario == HORA_LOCAL_MEDICO` y `(ultimo_resumen_enviado_en IS NULL OR ultimo_resumen_enviado_en < FECHA_LOCAL_MEDICO)`.
      * Si `alcance_resumen_diario == 'AGENDA_HOY'`: Envía la lista de pacientes del día en curso.
      * Si `alcance_resumen_diario == 'AGENDA_MANANA'`: Envía la lista de pacientes del día siguiente.
-     * Actualiza `ultimo_resumen_enviado_en = CURRENT_DATE`.
+     * **Formato sin pacientes:** Si el médico tiene `0` citas programadas para la jornada, el mensaje muestra únicamente el encabezado y `"No tienes citas programadas para esta jornada."`, omitiendo la línea `"Total de pacientes programados: 0"`. La línea de total solo se incluye cuando existe al menos `1` paciente.
+     * Actualiza `ultimo_resumen_enviado_en = FECHA_LOCAL_MEDICO`.
 
 ---
 

@@ -92,8 +92,11 @@ DEFAULT_TIMEZONE=America/Caracas
 PORT=8005
 
 # 2. Conexiones al Par 2 Compartido por Red Privada de Railway (src/core/config.py normaliza postgres:// a postgresql+asyncpg://)
-# Apuntar a la BD lógica 'citas_medicas' y al índice Redis '/1'
+# Apuntar a la BD lógica 'citas_medicas', acotar el pool del Par 2 y usar el índice Redis '/1'
 DATABASE_URL=postgresql://${{PostgresShared.PGUSER}}:${{PostgresShared.PGPASSWORD}}@${{PostgresShared.RAILWAY_PRIVATE_DOMAIN}}:5432/citas_medicas
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=5
+DB_POOL_TIMEOUT=15
 REDIS_URL=${{RedisShared.REDIS_PRIVATE_URL}}/1
 
 # 3. Seguridad Interna con el API Gateway (Debe ser idéntica a la configurada en api-gateway-auth)

@@ -11,6 +11,7 @@ from src.schemas.context import UserContext, RoleEnum
 from src.agent.fast_route import AgentResponse
 from src.agent.prompts import build_system_prompt
 from src.services.availability_service import listar_catalogo_medicos_activos
+from src.services.onboarding_service import obtener_estado_onboarding_medico
 from src.agent.mcp_tools.registry import (
     get_tools_for_user,
     current_user_ctx,
@@ -152,13 +153,25 @@ async def process_message_with_ai(
     """
     now = now_tz()
     catalogo_medicos = None
+    onboarding_medico = None
     if ctx.role == RoleEnum.PACIENTE:
         try:
             catalogo_medicos = await listar_catalogo_medicos_activos(db)
         except Exception as exc:
             logger.warning("[AI ORCHESTRATOR] Error obteniendo catálogo de médicos: %s", exc)
+    elif ctx.role == RoleEnum.MEDICO:
+        try:
+            onboarding_medico = await obtener_estado_onboarding_medico(db, ctx.user_id)
+            now = now_tz(onboarding_medico.get("zona_horaria"))
+        except Exception as exc:
+            logger.warning("[AI ORCHESTRATOR] Error obteniendo onboarding del médico: %s", exc)
 
-    system_instruction = build_system_prompt(ctx, now, catalogo_medicos=catalogo_medicos)
+    system_instruction = build_system_prompt(
+        ctx,
+        now,
+        catalogo_medicos=catalogo_medicos,
+        onboarding_medico=onboarding_medico,
+    )
     tools = get_tools_for_user(ctx)
 
     # 1. Recuperar historial de chat desde Redis
