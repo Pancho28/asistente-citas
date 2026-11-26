@@ -3,7 +3,7 @@
 > **Convención de Lectura Rápida (De lo más nuevo arriba a lo más antiguo abajo):**  
 > Este documento está ordenado en **orden cronológico inverso**. Las tareas pendientes (`[ ]`) de la iteración actual están siempre al inicio del archivo para que el agente ejecutor solo necesite leer las primeras líneas hasta encontrar el primer bloque ya completado (`[x]`).
 >
-> **Estado Actual:** 🟢 **En Producción en Railway (Bot Web + Worker ARQ + Postgres + Redis Activos | 67/67 Tests en Verde) | Pendiente: Mejora Onboarding Médico & CI/CD**
+> **Estado Actual:** 🟢 **Desplegado en Producción en Railway (Bot Web + Worker ARQ + Par 2 + Etapas 10 y 11 Activos) | Pendiente: CI/CD**
 
 ---
 
@@ -22,7 +22,7 @@
   - [x] **Resumen semanal filtrado:** Añadido `construir_resumen_dias_habilitados` en [`src/services/appointment_service.py`](src/services/appointment_service.py), conectado a `ver_agenda_profesional` (`dias_habilitados_en_rango`) y regla en [`src/agent/prompts.py`](src/agent/prompts.py) excluyendo días fuera de horario.
   - [x] **Onboarding guiado amable del médico:** Añadida columna `PERFILES_PROFESIONALES.onboarding_campos_configurados`, tracker `obtener_estado_onboarding_medico` en [`src/services/onboarding_service.py`](src/services/onboarding_service.py) e inyección en [`src/agent/orchestrator.py`](src/agent/orchestrator.py) / [`src/agent/prompts.py`](src/agent/prompts.py) para recordar amablemente las 4 configuraciones pendientes (`horario_consulta`, `duracion_cita`, `tarifa_consulta`, `notificacion_diaria`).
   - [x] **TDD & Migración:** Nueva suite [`tests/test_stage10_notifications_timezone_weekly_and_onboarding.py`](tests/test_stage10_notifications_timezone_weekly_and_onboarding.py) (`4/4` PASS) y migración `alembic upgrade head` aplicada (`0003_timezone_and_onboarding (head)`).
-- [ ] **Despliegue Par 2 + Etapa 10 en Railway (Web + Worker ARQ):** Subir los cambios de Par 2 (`DB_POOL_SIZE=5` / `DB_MAX_OVERFLOW=5` / `DB_POOL_TIMEOUT=15`) y Etapa 10 (migración `0003`), y verificar en Railway que `DATABASE_URL` apunte a `citas_medicas` y `REDIS_URL` termine en `/1` en ambos servicios.
+- [x] **Despliegue Par 2 + Etapas 10 y 11 en Railway (Web + Worker ARQ — Completado el 2026-11-25):** Subidos los cambios de Par 2 (`DB_POOL_SIZE=5` / `DB_MAX_OVERFLOW=5` / `DB_POOL_TIMEOUT=15`), Etapa 10 (migración `0003`) y Etapa 11 (suite `ADMIN`), verificando `DATABASE_URL` (`citas_medicas`) y `REDIS_URL` (`/1`) en ambos servicios.
 - [x] **Alineación Par 2 Compartido (`saas/PLAN.md` B.2, B.3 y Cutover Docker Raíz — Completado el 2026-11-25):**
   - [x] **B.2 — Pools de PostgreSQL:** Acotados `DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=5`, `DB_POOL_TIMEOUT=15` en [`src/core/config.py`](src/core/config.py) y `build_engine_options` en [`src/core/database.py`](src/core/database.py) (cubierto en [`tests/test_database_and_redis_pair2_config.py`](tests/test_database_and_redis_pair2_config.py)).
   - [x] **B.3 — Índice Redis `/1` y credenciales unificadas:** Actualizado default `REDIS_URL` en [`src/core/config.py`](src/core/config.py) a `redis://:redis_secure_password_2026@127.0.0.1:6380/1` junto con [`.env.example`](.env.example), `.env` y [`README.md`](README.md).
